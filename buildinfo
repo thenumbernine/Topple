@@ -1,0 +1,3 @@
+distName='Topple'
+distType='app'
+depends:append{'../Common', '../Tensor', '../Image', '../Parallel'}
