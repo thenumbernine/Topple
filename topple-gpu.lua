@@ -29,16 +29,6 @@ env:kernel{
 	}),
 }()
 
-local function printBuf(buf)
-	local cpu = buf:toCPU()
-	for j=0,tonumber(env.base.size.y)-1 do
-		for i=0,tonumber(env.base.size.x)-1 do
-io.write('\t',cpu[i+tonumber(env.base.size.x)*j])
-		end
-print()
-	end
-end
-
 local iterate = env:kernel{
 	argsOut = {nextBuffer, overflow},
 	argsIn = {buffer},
@@ -72,7 +62,6 @@ while true do
 	iterate.obj:setArg(0, nextBuffer.obj)
 	iterate.obj:setArg(2, buffer.obj)
 	iterate()
---printBuf(overflow)
 	buffer, nextBuffer = nextBuffer, buffer
 	-- swap so now 'buffer' has the right data
 	overflow:toCPU(overflowCPU)
@@ -98,8 +87,7 @@ require 'image'(
 	'unsigned char',
 	function(x,y)
 		local value = bufferCPU[x + env.base.size.x * y]
---testing:
-value = value % modulo
+		value = value % modulo
 		return colors[value+1]:unpack()
 	end):save'output.gpu.png'
 
