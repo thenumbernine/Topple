@@ -6,8 +6,8 @@ local sizes = table()
 local cputimes = table()
 local gputimes = table()
 
-for i=10,15 do
-	local stacksize = 2^i
+for i=10,15,.5 do
+	local stacksize = math.floor(2^i)
 	print('stacksize', stacksize)
 	sizes:insert(stacksize)
 
