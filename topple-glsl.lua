@@ -19,9 +19,8 @@ local clnumber = require 'cl.obj.number'
 local Mouse = require 'gui.mouse'
 
 local modulo = 4
-local initValue = ffi.new('int[1]', 
-	tonumber(arg[1] or bit.lshift(1,30))
-)
+local initValue = ffi.new('int[1]', tonumber(arg[1] or bit.lshift(1,16)))
+-- there's a bug with using more than 1<<16, so the 'b' and 'a' channels have something wrong in their math
 local gridsize = assert(tonumber(arg[2] or 1024))
 
 local App = class(ImGuiApp)
@@ -52,7 +51,7 @@ function App:initGL()
 	pingpong = PingPong{
 		width = gridsize,
 		height = gridsize,
-		internalFormat = gl.GL_RGBA,
+		internalFormat = gl.GL_RGBA8,
 		format = gl.GL_RGBA,
 		type = gl.GL_UNSIGNED_BYTE,
 		minFilter = gl.GL_NEAREST,
