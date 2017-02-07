@@ -1,8 +1,9 @@
 #!/usr/bin/env luajit
 local ffi = require 'ffi'
 local gl = require 'ffi.OpenGL'
+local ig = require 'ffi.imgui'
 local sdl = require 'ffi.sdl'
-local GLApp = require 'glapp'
+local ImGuiApp = require 'imguiapp'
 local class = require 'ext.class'
 local table = require 'ext.table'
 local vec2 = require 'vec.vec2'
@@ -10,25 +11,44 @@ local GLProgram = require 'gl.program'
 local HSVTex = require 'gl.hsvtex'
 local PingPong = require 'gl.pingpong'
 local glreport = require 'gl.report'
+local GLTex2D = require 'gl.tex2d'
+local template = require 'template'
+local Image = require 'image'
+-- isle of misfits:
 local clnumber = require 'cl.obj.number'
 local Mouse = require 'gui.mouse'
-local template = require 'template'
 
 local modulo = 4
-local initValue = tonumber(arg[1] or bit.lshift(1,30))
+local initValue = ffi.new('int[1]', 
+	tonumber(arg[1] or bit.lshift(1,30))
+)
 local gridsize = assert(tonumber(arg[2] or 1024))
 
-local App = class(GLApp)
+local App = class(ImGuiApp)
 local grad
 local pingpong
 local updateShader
 local displayShader
 local mouse = Mouse()
-function App:initGL()
-	local bufferCPU = ffi.new('int[?]', gridsize * gridsize)
-	ffi.fill(bufferCPU, ffi.sizeof'int' * gridsize * gridsize)
-	bufferCPU[bit.rshift(gridsize,1) + gridsize * bit.rshift(gridsize,1)] = initValue
+	
+local bufferCPU = ffi.new('int[?]', gridsize * gridsize)
 
+local vec3ub = require 'ffi.vec.vec3ub'
+local colors = {
+	vec3ub(0,0,0),
+	vec3ub(0,255,255),
+	vec3ub(255,255,0),
+	vec3ub(255,0,0),
+}
+
+function App:initGL()
+	App.super.initGL(self)
+
+	gl.glClearColor(.2, .2, .2, 0)
+
+	ffi.fill(bufferCPU, ffi.sizeof'int' * gridsize * gridsize)
+	bufferCPU[bit.rshift(gridsize,1) + gridsize * bit.rshift(gridsize,1)] = initValue[0]
+	
 	pingpong = PingPong{
 		width = gridsize,
 		height = gridsize,
@@ -44,7 +64,26 @@ function App:initGL()
 		data = bufferCPU,
 	}
 
-	grad = HSVTex(256)
+	grad = GLTex2D{
+		width = modulo,
+		height = 1,
+		internalFormat = gl.GL_RGB,
+		format = gl.GL_RGB,
+		type = gl.GL_UNSIGNED_BYTE,
+		minFilter = gl.GL_NEAREST,
+		magFilter = gl.GL_NEAREST,
+		wrap = {
+			s = gl.GL_REPEAT,
+			t = gl.GL_REPEAT,
+		},
+		data = ffi.new('unsigned char[12]', {
+			colors[1].x, colors[1].y, colors[1].z,
+			colors[2].x, colors[2].y, colors[2].z,
+			colors[3].x, colors[3].y, colors[3].z,
+			colors[4].x, colors[4].y, colors[4].z,
+		}),
+	}
+	grad:bind(1)
 
 	updateShader = GLProgram{
 		vertexCode = [[
@@ -100,7 +139,6 @@ void main() {
 	}
 	updateShader:use()
 	gl.glUniform1i(updateShader.uniforms.tex, 0)
-	updateShader:useNone()
 
 	displayShader = GLProgram{
 		vertexCode = [[
@@ -113,11 +151,11 @@ void main() {
 		fragmentCode = template([[
 varying vec2 tc;
 uniform sampler2D tex;
-uniform sampler1D grad;
+uniform sampler2D grad;
 void main() {
 	vec3 toppleColor = texture2D(tex, tc).rgb;
 	float value = toppleColor.r * <?=clnumber(256 / modulo)?>;
-	gl_FragColor = texture1D(grad, value);
+	gl_FragColor = texture2D(grad, vec2(value + <?=clnumber(.5 / modulo)?>, .5));
 }
 ]],			{
 				clnumber = clnumber,
@@ -132,7 +170,6 @@ void main() {
 	displayShader:use()
 	gl.glUniform1i(displayShader.uniforms.tex, 0)
 	gl.glUniform1i(displayShader.uniforms.grad, 1)
-	displayShader:useNone()
 
 	glreport 'here'
 end
@@ -145,13 +182,19 @@ local zoom = 1
 local viewPos = vec2(0,0)
 
 function App:update()
-	mouse:update()
-	if mouse.leftDragging then
-		if leftShiftDown or rightShiftDown then
-			zoom = zoom * math.exp(10 * mouse.deltaPos[2])
-		else
-			local ar = self.width / self.height
-			viewPos = viewPos - vec2(mouse.deltaPos[1] * ar, mouse.deltaPos[2]) * 2
+	local canHandleMouse = not ig.igGetIO()[0].WantCaptureMouse
+	if canHandleMouse then 
+		mouse:update()
+	end	
+	
+	if canHandleMouse then
+		if mouse.leftDragging then
+			if leftShiftDown or rightShiftDown then
+				zoom = zoom * math.exp(10 * mouse.deltaPos[2])
+			else
+				local ar = self.width / self.height
+				viewPos = viewPos - vec2(mouse.deltaPos[1] * ar, mouse.deltaPos[2]) * (2 / zoom)
+			end
 		end
 	end
 
@@ -181,23 +224,29 @@ function App:update()
 
 	gl.glMatrixMode(gl.GL_MODELVIEW)
 	gl.glLoadIdentity()
-	gl.glTranslated(-viewPos[1], -viewPos[2], 0)
 	gl.glScaled(zoom, zoom, 1)
+	gl.glTranslated(-viewPos[1], -viewPos[2], 0)
 
 	gl.glClear(bit.bor(gl.GL_COLOR_BUFFER_BIT, gl.GL_DEPTH_BUFFER_BIT))
 	displayShader:use()
 	pingpong:cur():bind(0)
-	grad:bind(1)
 	gl.glBegin(gl.GL_TRIANGLE_STRIP)
 	for _,v in ipairs{{0,0},{1,0},{0,1},{1,1}} do
 		gl.glTexCoord2d(v[1], v[2])
 		gl.glVertex2d(v[1]*2-1, v[2]*2-1)
 	end
 	gl.glEnd()
-	displayShader:useNone()
+	pingpong:cur():unbind(0)
+	
+	GLProgram:useNone()
+	App.super.update(self)
 end
 
-function App:event(event)
+function App:event(event, eventPtr)
+	App.super.event(self, event, eventPtr)
+	local canHandleMouse = not ig.igGetIO()[0].WantCaptureMouse
+	local canHandleKeyboard = not ig.igGetIO()[0].WantCaptureKeyboard
+
 	if event.type == sdl.SDL_MOUSEBUTTONDOWN then
 		if event.button.button == sdl.SDL_BUTTON_WHEELUP then
 			zoom = zoom * zoomFactor
@@ -213,26 +262,27 @@ function App:event(event)
 	end
 end
 
+function App:updateGUI()
+	ig.igInputInt('initial value', initValue)
+	
+	if ig.igButton'Reset' then
+		pingpong:prev():bind(0)
+		ffi.fill(bufferCPU, ffi.sizeof'int' * gridsize * gridsize)
+		bufferCPU[bit.rshift(gridsize,1) + gridsize * bit.rshift(gridsize,1)] = initValue[0]
+		gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, gridsize, gridsize, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, bufferCPU)
+		pingpong:prev():unbind(0)
+	end
+
+	if ig.igButton'Save' then
+		pingpong:prev():bind(0)	-- prev? shouldn't this be cur?
+		gl.glGetTexImage(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, bufferCPU)
+		pingpong:prev():unbind(0)
+		Image(gridsize, gridsize, 3, 'unsigned char', function(x,y)
+			local value = bufferCPU[x + gridsize * y]
+			value = value % modulo
+			return colors[value+1]:unpack()
+		end):save'output.glsl.png'
+	end
+end
+
 App():run()
-
---[[ output results?
-local vec3ub = require 'ffi.vec.vec3ub'
-local colors = {
-	vec3ub(0,0,0),
-	vec3ub(0,255,255),
-	vec3ub(255,255,0),
-	vec3ub(255,0,0),
-}
-
-buffer:toCPU(bufferCPU)
-require 'image'(
-	tonumber(env.base.size.x), 
-	tonumber(env.base.size.y), 
-	3,
-	'unsigned char',
-	function(x,y)
-		local value = bufferCPU[x + env.base.size.x * y]
-		value = value % modulo
-		return colors[value+1]:unpack()
-	end):save'output.gpu.png'
---]]
