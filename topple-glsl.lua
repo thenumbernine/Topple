@@ -1,50 +1,5 @@
 #!/usr/bin/env luajit
 local ffi = require 'ffi'
-local template = require 'template'
-
-local modulo = 4
-local initValue = tonumber(arg[1] or bit.lshift(1,10))
-local gridsize = assert(tonumber(arg[2] or 1024))
-
---[=[
-local iterKernel = env:kernel{
-	argsOut = {nextBuffer, overflow},
-	argsIn = {buffer},
-	body = require 'template'([[
-	<?=toppleType?> lastb = buffer[index];
-	global <?=toppleType?>* nextb = nextBuffer + index;
-	*nextb = lastb;
-	if (lastb >= <?=modulo?>) *overflow = 1;
-	*nextb %= <?=modulo?>;
-	<? for side=0,1 do ?>{
-		if (i.s<?=side?> > 0) {
-			*nextb += buffer[index - stepsize.s<?=side?>] / <?=modulo?>;
-		}
-		if (i.s<?=side?> < size.s<?=side?>-1) {
-			*nextb += buffer[index + stepsize.s<?=side?>] / <?=modulo?>;
-		}
-	}<? end ?>
-]], {
-	toppleType = 'int',
-	modulo = modulo,
-}),
-}
-iterKernel:compile()
-
-local function iterate()
-	overflow:fill(0)
-	-- read from 'buffer', write to 'nextBuffer'
-	iterKernel.obj:setArg(0, nextBuffer.obj)
-	iterKernel.obj:setArg(2, buffer.obj)
-	iterKernel()
-	buffer, nextBuffer = nextBuffer, buffer
-	-- swap so now 'buffer' has the right data
-	overflow:toCPU(overflowCPU)
-	return overflowCPU[0] == 0
-end
---]=]
-
--- [[ show progress?
 local gl = require 'ffi.OpenGL'
 local sdl = require 'ffi.sdl'
 local GLApp = require 'glapp'
@@ -52,18 +7,29 @@ local class = require 'ext.class'
 local table = require 'ext.table'
 local vec2 = require 'vec.vec2'
 local GLProgram = require 'gl.program'
+local HSVTex = require 'gl.hsvtex'
+local PingPong = require 'gl.pingpong'
+local glreport = require 'gl.report'
+local clnumber = require 'cl.obj.number'
+local Mouse = require 'gui.mouse'
+local template = require 'template'
+
+local modulo = 4
+local initValue = tonumber(arg[1] or bit.lshift(1,30))
+local gridsize = assert(tonumber(arg[2] or 1024))
+
 local App = class(GLApp)
 local grad
 local pingpong
 local updateShader
 local displayShader
-local mouse = require 'gui.mouse'()
+local mouse = Mouse()
 function App:initGL()
 	local bufferCPU = ffi.new('int[?]', gridsize * gridsize)
 	ffi.fill(bufferCPU, ffi.sizeof'int' * gridsize * gridsize)
 	bufferCPU[bit.rshift(gridsize,1) + gridsize * bit.rshift(gridsize,1)] = initValue
 
-	pingpong = require 'gl.pingpong'{
+	pingpong = PingPong{
 		width = gridsize,
 		height = gridsize,
 		internalFormat = gl.GL_RGBA,
@@ -78,7 +44,7 @@ function App:initGL()
 		data = bufferCPU,
 	}
 
-	grad = require 'gl.hsvtex'(256)
+	grad = HSVTex(256)
 
 	updateShader = GLProgram{
 		vertexCode = [[
@@ -91,25 +57,50 @@ void main() {
 		fragmentCode = template([[
 varying vec2 tc;
 uniform sampler2D tex;
+
+const float du = <?=clnumber(du)?>;
+const float modulo = <?=clnumber(modulo)?>;
+
+//divide by modulo
+vec4 fixedShift(vec4 v) {
+	vec4 r = mod(v, modulo / 256.);
+	v -= r;	//remove lower bits
+	v *= 1. / modulo;	//perform fixed division
+	v.rgb += r.gba * (256. / modulo);	//add the remainder lower bits
+	return v;
+}
+
 void main() {
-	const float du = <?=du?>;
 	vec4 last = texture2D(tex, tc);
-	vec4 next = last;
-	next = vec4(mod(next.r, 4./256.), 0., 0., 0.);
-	next += texture2D(tex, tc + vec2(du, 0));
-	next += texture2D(tex, tc + vec2(-du, 0));
-	next += texture2D(tex, tc + vec2(0, du));
-	next += texture2D(tex, tc + vec2(0, -du));
 	
+	//sum neighbors
+	vec4 next = fixedShift(texture2D(tex, tc + vec2(du, 0)))
+		+ fixedShift(texture2D(tex, tc + vec2(-du, 0)))
+		+ fixedShift(texture2D(tex, tc + vec2(0, du)))
+		+ fixedShift(texture2D(tex, tc + vec2(0, -du)));
+
+	//add last cell modulo
+	next.r += mod(last.r, modulo / 256.);
+	
+	//addition with overflow
 	next.gba += floor(next.rgb) * (1. / 256.);
 	next = mod(next, 1.);
 	
 	gl_FragColor = next;
 }
 ]],			{
+				clnumber = clnumber,
 				du = 1 / gridsize,
-			}),
+				modulo = modulo,
+			}
+		),
+		uniforms = {
+			'tex',
+		},
 	}
+	updateShader:use()
+	gl.glUniform1i(updateShader.uniforms.tex, 0)
+	updateShader:useNone()
 
 	displayShader = GLProgram{
 		vertexCode = [[
@@ -129,7 +120,7 @@ void main() {
 	gl_FragColor = texture1D(grad, value);
 }
 ]],			{
-				clnumber = require 'cl.obj.number',
+				clnumber = clnumber,
 				modulo = modulo,
 			}
 		),
@@ -143,14 +134,16 @@ void main() {
 	gl.glUniform1i(displayShader.uniforms.grad, 1)
 	displayShader:useNone()
 
-	require 'gl.report' 'here'
+	glreport 'here'
 end
+
 local iteration = 1
 local leftShiftDown
 local rightShiftDown 
 local zoomFactor = .9
 local zoom = 1
 local viewPos = vec2(0,0)
+
 function App:update()
 	mouse:update()
 	if mouse.leftDragging then
@@ -161,7 +154,8 @@ function App:update()
 			viewPos = viewPos - vec2(mouse.deltaPos[1] * ar, mouse.deltaPos[2]) * 2
 		end
 	end
-	
+
+	-- [[
 	pingpong:draw{
 		viewport = {0, 0, gridsize, gridsize},
 		resetProjection = true,
@@ -171,13 +165,14 @@ function App:update()
 			gl.glBegin(gl.GL_TRIANGLE_STRIP)
 			for _,v in ipairs{{0,0},{1,0},{0,1},{1,1}} do
 				gl.glTexCoord2d(v[1], v[2])
-				gl.glVertex2d(v[1]*2-1, v[2]*2-1)
+				gl.glVertex2d(v[1], v[2])
 			end
 			gl.glEnd()
 		end,
 	}
 	pingpong:swap()
 	iteration = iteration + 1
+	--]]
 
 	local ar = self.width / self.height
 	gl.glMatrixMode(gl.GL_PROJECTION)
@@ -201,6 +196,7 @@ function App:update()
 	gl.glEnd()
 	displayShader:useNone()
 end
+
 function App:event(event)
 	if event.type == sdl.SDL_MOUSEBUTTONDOWN then
 		if event.button.button == sdl.SDL_BUTTON_WHEELUP then
@@ -216,8 +212,8 @@ function App:event(event)
 		end
 	end
 end
+
 App():run()
---]]
 
 --[[ output results?
 local vec3ub = require 'ffi.vec.vec3ub'
