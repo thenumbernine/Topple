@@ -54,7 +54,6 @@ local iterate = env:kernel{
 iterate:compile()
 
 local startTime = os.clock()
-local numOverflows
 local iter = 1
 while true do
 	overflow:fill(0)
@@ -90,4 +89,3 @@ require 'image'(
 		value = value % modulo
 		return colors[value+1]:unpack()
 	end):save'output.gpu.png'
-
