@@ -3,6 +3,7 @@ local ffi = require 'ffi'
 local gl = require 'ffi.OpenGL'
 local ig = require 'ffi.imgui'
 local sdl = require 'ffi.sdl'
+local vec3ub = require 'ffi.vec.vec3ub'
 local ImGuiApp = require 'imguiapp'
 local class = require 'ext.class'
 local table = require 'ext.table'
@@ -19,7 +20,8 @@ local clnumber = require 'cl.obj.number'
 local Mouse = require 'gui.mouse'
 
 local modulo = 4
-local initValue = ffi.new('int[1]', tonumber(arg[1] or bit.lshift(1,16)))
+local initValue = ffi.new('int[1]', 1)
+local drawValue = ffi.new('int[1]', 25)
 -- there's a bug with using more than 1<<16, so the 'b' and 'a' channels have something wrong in their math
 local gridsize = assert(tonumber(arg[2] or 1024))
 
@@ -32,13 +34,23 @@ local mouse = Mouse()
 	
 local bufferCPU = ffi.new('int[?]', gridsize * gridsize)
 
-local vec3ub = require 'ffi.vec.vec3ub'
 local colors = {
 	vec3ub(0,0,0),
 	vec3ub(0,255,255),
 	vec3ub(255,255,0),
 	vec3ub(255,0,0),
 }
+
+local totalSand = 0
+
+local function reset()
+	ffi.fill(bufferCPU, ffi.sizeof'int' * gridsize * gridsize)
+	bufferCPU[bit.rshift(gridsize,1) + gridsize * bit.rshift(gridsize,1)] = initValue[0]
+	pingpong:prev():bind(0)
+	gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, gridsize, gridsize, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, bufferCPU)
+	pingpong:prev():unbind(0)
+	totalSand = initValue[0]
+end
 
 function App:initGL()
 	App.super.initGL(self)
@@ -62,6 +74,7 @@ function App:initGL()
 		},
 		data = bufferCPU,
 	}
+	reset()
 
 	grad = GLTex2D{
 		width = modulo,
@@ -103,7 +116,7 @@ const float modulo = <?=clnumber(modulo)?>;
 vec4 fixedShift(vec4 v) {
 	vec4 r = mod(v, modulo / 256.);
 	v -= r;	//remove lower bits
-	v *= 1. / modulo;	//perform fixed division
+	v /= modulo;	//perform fixed division
 	v.rgb += r.gba * (256. / modulo);	//add the remainder lower bits
 	return v;
 }
@@ -121,9 +134,10 @@ void main() {
 	next.r += mod(last.r, modulo / 256.);
 	
 	//addition with overflow
-	next.gba += floor(next.rgb) * (1. / 256.);
+	next.g += floor(next.r) / 256.;
+	next.b += floor(next.g) / 256.;
+	next.a += floor(next.b) / 256.;
 	next = mod(next, 1.);
-	
 	gl_FragColor = next;
 }
 ]],			{
@@ -173,7 +187,6 @@ void main() {
 	glreport 'here'
 end
 
-local iteration = 1
 local leftShiftDown
 local rightShiftDown 
 local zoomFactor = .9
@@ -181,23 +194,41 @@ local zoom = 1
 local viewPos = vec2(0,0)
 
 function App:update()
+	local ar = self.width / self.height
+	
 	local canHandleMouse = not ig.igGetIO()[0].WantCaptureMouse
 	if canHandleMouse then 
 		mouse:update()
-	end	
-	
-	if canHandleMouse then
-		if mouse.leftDragging then
+		if mouse.leftDown then
+			local pos = (mouse.pos - vec2(.5, .5)) * (2 / zoom)
+			pos[1] = pos[1] * ar
+			pos = ((pos + viewPos) * .5 + vec2(.5, .5)) * gridsize
+			local x = math.floor(pos[1] + .5)
+			local y = math.floor(pos[2] + .5)
+			if x >= 0 and x < gridsize and y >= 0 and y < gridsize then
+				local value = ffi.new('int[1]', 0)
+				pingpong:draw{
+					callback = function()
+						gl.glReadPixels(x, y, 1, 1, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, value)
+						value[0] = value[0] + drawValue[0]
+					end,
+				}
+				pingpong:prev():bind(0)
+				gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, x, y, 1, 1, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, value)
+				pingpong:prev():unbind(0)
+				totalSand = totalSand + drawValue[0]
+			end
+		end
+		if mouse.rightDragging then
 			if leftShiftDown or rightShiftDown then
 				zoom = zoom * math.exp(10 * mouse.deltaPos[2])
 			else
-				local ar = self.width / self.height
 				viewPos = viewPos - vec2(mouse.deltaPos[1] * ar, mouse.deltaPos[2]) * (2 / zoom)
 			end
 		end
 	end
 
-	-- [[
+	-- update
 	pingpong:draw{
 		viewport = {0, 0, gridsize, gridsize},
 		resetProjection = true,
@@ -213,10 +244,7 @@ function App:update()
 		end,
 	}
 	pingpong:swap()
-	iteration = iteration + 1
-	--]]
 
-	local ar = self.width / self.height
 	gl.glMatrixMode(gl.GL_PROJECTION)
 	gl.glLoadIdentity()
 	gl.glOrtho(-ar, ar, -1, 1, -1, 1)
@@ -262,16 +290,11 @@ function App:event(event, eventPtr)
 end
 
 function App:updateGUI()
-	ig.igInputInt('initial value', initValue)
+	ig.igText('total sand: '..totalSand)
 	
-	if ig.igButton'Reset' then
-		pingpong:prev():bind(0)
-		ffi.fill(bufferCPU, ffi.sizeof'int' * gridsize * gridsize)
-		bufferCPU[bit.rshift(gridsize,1) + gridsize * bit.rshift(gridsize,1)] = initValue[0]
-		gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, gridsize, gridsize, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, bufferCPU)
-		pingpong:prev():unbind(0)
-	end
-
+	ig.igInputInt('initial value', initValue)
+	ig.igInputInt('draw value', drawValue)
+	
 	if ig.igButton'Save' then
 		pingpong:prev():bind(0)	-- prev? shouldn't this be cur?
 		gl.glGetTexImage(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, bufferCPU)
@@ -281,6 +304,41 @@ function App:updateGUI()
 			value = value % modulo
 			return colors[value+1]:unpack()
 		end):save'output.glsl.png'
+	end
+
+	ig.igSameLine()
+
+	if ig.igButton'Load' then
+		local image = Image'output.gpu.png'
+		assert(image.width == gridsize)
+		assert(image.height == gridsize)
+		assert(image.channels == 3)
+		for y=0,image.height-1 do
+			for x=0,image.width-1 do
+				local rgb = image.buffer + 4 * (x + image.width * y)
+				for i,color in ipairs(colors) do
+					if rgb[0] == color.x
+					and rgb[1] == color.y
+					and rgb[2] == color.z
+					then
+						bufferCPU[x + gridsize * y] = i-1
+						break
+					end
+					if i == #colors then
+						error("unknown color")
+					end
+				end
+			end
+		end
+		pingpong:prev():bind(0)
+		gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, gridsize, gridsize, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, bufferCPU)
+		pingpong:prev():unbind(0)
+	end
+
+	ig.igSameLine()
+	
+	if ig.igButton'Reset' then
+		reset()
 	end
 end
 

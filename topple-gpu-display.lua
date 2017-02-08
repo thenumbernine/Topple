@@ -1,43 +1,52 @@
 #!/usr/bin/env luajit
 local ffi = require 'ffi'
+local gl = require 'ffi.OpenGL'
+local ig = require 'ffi.imgui'
+local sdl = require 'ffi.sdl'
 local vec3ub = require 'ffi.vec.vec3ub'
+local ImGuiApp = require 'imguiapp'
+local class = require 'ext.class'
+local table = require 'ext.table'
+local vec2 = require 'vec.vec2'
+local Mouse = require 'gui.mouse'
+local CLEnv = require 'cl.obj.env'
+local clnumber = require 'cl.obj.number'
+local GLTex2D = require 'gl.tex2d'
+local GLProgram = require 'gl.program'
+local glreport = require 'gl.report'
 local template = require 'template'
+local Image = require 'image'
 
 local toppleType = 'int'
 
 local modulo = 4
-local initValue = arg[1] or '1<<10'
-local gridsize = assert(tonumber(arg[2] or 1001))
+local initValue = ffi.new(toppleType..'[1]', 1)
+local drawValue = ffi.new(toppleType..'[1]', 25)
+local gridsize = assert(tonumber(arg[2] or 1024))
 
-local env = require 'cl.obj.env'{size = {gridsize, gridsize}}
+local env = CLEnv{size = {gridsize, gridsize}}
 local buffer = env:buffer{name='buffer', type=toppleType}
 local nextBuffer = env:buffer{name='nextBuffer', type=toppleType}
 local bufferCPU = ffi.new(toppleType..'[?]', env.base.volume)
 
-local overflow = env:buffer{size=1, name='overflow', type='char'}
-local overflowCPU = ffi.new'char[1]'
+local totalSand = 0
 
-env:kernel{
-	argsOut = {buffer},
-	body = template([[ 
-	if (i.x == size.x / 2 && i.y == size.y / 2) {
-		buffer[index] = <?=initValue?>; 
-	} else {
-		buffer[index] = 0;
-	}
-]],	{
-		initValue = initValue,
-	}),
-}()
+local function reset()
+	ffi.fill(bufferCPU, ffi.sizeof(toppleType) * gridsize * gridsize)
+	bufferCPU[bit.rshift(gridsize,1) + gridsize * bit.rshift(gridsize,1)] = initValue[0]
+	buffer:fromCPU(bufferCPU)
+	totalSand = initValue[0]
+end
+
+reset()
 
 local iterKernel = env:kernel{
-	argsOut = {nextBuffer, overflow},
+	argsOut = {nextBuffer},
 	argsIn = {buffer},
-	body = require 'template'([[
+	body = template([[
 	<?=toppleType?> lastb = buffer[index];
 	global <?=toppleType?>* nextb = nextBuffer + index;
 	*nextb = lastb;
-	if (lastb >= <?=modulo?>) *overflow = 1;
 	*nextb %= <?=modulo?>;
 	<? for side=0,1 do ?>{
 		if (i.s<?=side?> > 0) {
@@ -48,42 +57,80 @@ local iterKernel = env:kernel{
 		}
 	}<? end ?>
 ]], {
-	toppleType = toppleType,
-	modulo = modulo,
-}),
+		toppleType = toppleType,
+		modulo = modulo,
+	}),
 }
 iterKernel:compile()
 
-local function iterate()
-	overflow:fill(0)
-	-- read from 'buffer', write to 'nextBuffer'
-	iterKernel.obj:setArg(0, nextBuffer.obj)
-	iterKernel.obj:setArg(2, buffer.obj)
-	iterKernel()
-	buffer, nextBuffer = nextBuffer, buffer
-	-- swap so now 'buffer' has the right data
-	overflow:toCPU(overflowCPU)
-	return overflowCPU[0] == 0
+local doubleKernel = env:kernel{
+	argsOut = {buffer},
+	body = [[
+	buffer[index] <<= 1;
+]],
+}
+
+local function double()
+	doubleKernel(buffer)
+	totalSand = totalSand * 2
 end
 
--- [[ show progress?
-local gl = require 'ffi.OpenGL'
-local sdl = require 'ffi.sdl'
-local GLApp = require 'glapp'
-local class = require 'ext.class'
-local table = require 'ext.table'
-local vec2 = require 'vec.vec2'
-local App = class(GLApp)
-local tex, grad
-local mouse = require 'gui.mouse'()
+local function iterate()
+	-- read from 'buffer', write to 'nextBuffer'
+	iterKernel.obj:setArg(0, nextBuffer.obj)
+	iterKernel.obj:setArg(1, buffer.obj)
+	iterKernel()
+	-- swap so now 'buffer' has the right data
+	buffer, nextBuffer = nextBuffer, buffer
+end
+
+local mouse = Mouse()
+
+local App = class(ImGuiApp)
+
+local colors = {
+	vec3ub(0,0,0),
+	vec3ub(0,255,255),
+	vec3ub(255,255,0),
+	vec3ub(255,0,0),
+}
+assert(#colors == modulo)
+
+local tex, grad, shader
+
+local texsize = 1024
+assert(texsize >= gridsize)
+
 function App:initGL()
+	App.super.initGL(self)
+	
+	gl.glClearColor(.2, .2, .2, 0)
+
 	assert(toppleType == 'int')
 
-	grad = require 'gl.hsvtex'(256)
-	
-	tex = require 'gl.tex2d'{
-		width = 1024,
-		height = 1024,
+	grad = GLTex2D{
+		width = modulo,
+		height = 1,
+		internalFormat = gl.GL_RGB,
+		format = gl.GL_RGB,
+		type = gl.GL_UNSIGNED_BYTE,
+		minFilter = gl.GL_NEAREST,
+		magFilter = gl.GL_NEAREST,
+		wrap = {
+			s = gl.GL_REPEAT,
+			t = gl.GL_REPEAT,
+		},
+		data = ffi.new('unsigned char[12]', {
+			colors[1].x, colors[1].y, colors[1].z,
+			colors[2].x, colors[2].y, colors[2].z,
+			colors[3].x, colors[3].y, colors[3].z,
+			colors[4].x, colors[4].y, colors[4].z,
+		}),
+	}
+
+	tex = GLTex2D{
+		width = texsize,
+		height = texsize,
 		-- toppleType is 32 bits of integer
 		-- so the texture will hold 8,8,8,8 RGBA
 		-- and only the 1st channel will hold anything relevant
@@ -100,7 +147,7 @@ function App:initGL()
 	}
 	tex:unbind()
 
-	shader = require 'gl.program'{
+	shader = GLProgram{
 		vertexCode = [[
 varying vec2 tc;
 void main() {
@@ -111,14 +158,14 @@ void main() {
 		fragmentCode = template([[
 varying vec2 tc;
 uniform sampler2D tex;
-uniform sampler1D grad;
+uniform sampler2D grad;
 void main() {
 	vec3 toppleColor = texture2D(tex, tc).rgb;
 	float value = toppleColor.r * <?=clnumber(256 / modulo)?>;
-	gl_FragColor = texture1D(grad, value);
+	gl_FragColor = texture2D(grad, vec2(value + <?=clnumber(.5 / modulo)?>, .5));
 }
 ]],			{
-				clnumber = require 'cl.obj.number',
+				clnumber = clnumber,
 				modulo = modulo,
 			}
 		),
@@ -130,12 +177,11 @@ void main() {
 	shader:use()
 	gl.glUniform1i(shader.uniforms.tex, 0)
 	gl.glUniform1i(shader.uniforms.grad, 1)
+	shader:useNone()
 	
-	tex:bind(0)
-	grad:bind(1)
-
-	require 'gl.report' 'here'
+	glreport 'here'
 end
+
 local iteration = 1
 local leftShiftDown
 local rightShiftDown 
@@ -143,41 +189,72 @@ local zoomFactor = .9
 local zoom = 1
 local viewPos = vec2(0,0)
 function App:update()
-	mouse:update()
-	if mouse.leftDragging then
-		if leftShiftDown or rightShiftDown then
-			zoom = zoom * math.exp(10 * mouse.deltaPos[2])
-		else
-			local ar = self.width / self.height
-			viewPos = viewPos - vec2(mouse.deltaPos[1] * ar, mouse.deltaPos[2]) * 2
+	local ar = self.width / self.height
+	
+	local canHandleMouse = not ig.igGetIO()[0].WantCaptureMouse
+	if canHandleMouse then 
+		mouse:update()
+		if mouse.leftDown then
+			local pos = (mouse.pos - vec2(.5, .5)) * (2 / zoom)
+			pos[1] = pos[1] * ar
+			pos = ((pos + viewPos) * .5 + vec2(.5, .5)) * gridsize
+			local x = math.floor(pos[1] + .5)
+			local y = math.floor(pos[2] + .5)
+			if x >= 0 and x < gridsize and y >= 0 and y < gridsize then
+				buffer:toCPU(bufferCPU)
+				local ptr = bufferCPU + (x + gridsize * y)
+				ptr[0] = ptr[0] + drawValue[0]
+				totalSand = totalSand + drawValue[0]
+				buffer:fromCPU(bufferCPU)
+			end
+		end
+		if mouse.rightDragging then
+			if leftShiftDown or rightShiftDown then
+				zoom = zoom * math.exp(10 * mouse.deltaPos[2])
+			else
+				viewPos = viewPos - vec2(mouse.deltaPos[1] * ar, mouse.deltaPos[2]) * (2 / zoom)
+			end
 		end
 	end
-	
+
 	gl.glClear(bit.bor(gl.GL_COLOR_BUFFER_BIT, gl.GL_DEPTH_BUFFER_BIT))
 	
-	local ar = self.width / self.height
 	gl.glMatrixMode(gl.GL_PROJECTION)
 	gl.glLoadIdentity()
 	gl.glOrtho(-ar, ar, -1, 1, -1, 1)
 
 	gl.glMatrixMode(gl.GL_MODELVIEW)
 	gl.glLoadIdentity()
-	gl.glTranslated(-viewPos[1], -viewPos[2], 0)
 	gl.glScaled(zoom, zoom, 1)
+	gl.glTranslated(-viewPos[1], -viewPos[2], 0)
 
 	iterate()
 	buffer:toCPU(bufferCPU)
-	gl.glActiveTexture(gl.GL_TEXTURE0)
+	
+	shader:use()
+	tex:bind(0)
 	gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, gridsize, gridsize, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, bufferCPU)
+	grad:bind(1)
 
 	gl.glBegin(gl.GL_TRIANGLE_STRIP)
 	for _,v in ipairs{{0,0},{1,0},{0,1},{1,1}} do
-		gl.glTexCoord2d(v[1] * gridsize / 1024, v[2] * gridsize / 1024)
+		gl.glTexCoord2d(v[1] * gridsize / texsize, v[2] * gridsize / texsize)
 		gl.glVertex2d(v[1]*2-1, v[2]*2-1)
 	end
 	gl.glEnd()
+
+	grad:unbind(1)
+	tex:unbind(0)
+	shader:useNone()
+
+	App.super.update(self)
 end
-function App:event(event)
+
+function App:event(event, eventPtr)
+	App.super.event(self, event, eventPtr)
+	local canHandleMouse = not ig.igGetIO()[0].WantCaptureMouse
+	local canHandleKeyboard = not ig.igGetIO()[0].WantCaptureKeyboard
+	
 	if event.type == sdl.SDL_MOUSEBUTTONDOWN then
 		if event.button.button == sdl.SDL_BUTTON_WHEELUP then
 			zoom = zoom * zoomFactor
@@ -192,26 +269,60 @@ function App:event(event)
 		end
 	end
 end
+
+function App:updateGUI()
+	ig.igText('total sand: '..totalSand)
+	
+	ig.igInputInt('initial value', initValue)	
+	ig.igInputInt('draw value', drawValue)
+
+	if ig.igButton'Save' then
+		buffer:toCPU(bufferCPU)
+		Image(gridsize, gridsize, 3, 'unsigned char', function(x,y)
+				local value = bufferCPU[x + env.base.size.x * y]
+				value = value % modulo
+				return colors[value+1]:unpack()
+		end):save'output.gpu.png'
+	end
+
+	ig.igSameLine()
+	
+	if ig.igButton'Load' then
+		local image = Image'output.gpu.png'
+		assert(image.width == gridsize)
+		assert(image.height == gridsize)
+		assert(image.channels == 3)
+		for y=0,image.height-1 do
+			for x=0,image.width-1 do
+				local rgb = image.buffer + 4 * (x + image.width * y)
+				for i,color in ipairs(colors) do
+					if rgb[0] == color.x
+					and rgb[1] == color.y
+					and rgb[2] == color.z
+					then
+						bufferCPU[x + gridsize * y] = i-1
+						break
+					end
+					if i == #colors then
+						error("unknown color")
+					end
+				end
+			end
+		end
+		buffer:fromCPU(bufferCPU)
+	end
+
+	ig.igSameLine()
+	
+	if ig.igButton'Reset' then
+		reset()
+	end
+
+	ig.igSameLine()
+
+	if ig.igButton'Double' then
+		double()
+	end
+end
+
 App():run()
---]]
-
---[[ output results?
-local colors = {
-	vec3ub(0,0,0),
-	vec3ub(0,255,255),
-	vec3ub(255,255,0),
-	vec3ub(255,0,0),
-}
-
-buffer:toCPU(bufferCPU)
-require 'image'(
-	tonumber(env.base.size.x), 
-	tonumber(env.base.size.y), 
-	3,
-	'unsigned char',
-	function(x,y)
-		local value = bufferCPU[x + env.base.size.x * y]
-		value = value % modulo
-		return colors[value+1]:unpack()
-	end):save'output.gpu.png'
---]]

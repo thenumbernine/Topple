@@ -15,7 +15,6 @@ local nextBuffer = env:buffer{name='nextBuffer', type=toppleType}
 local overflow = env:buffer{size=1, name='overflow', type='char'}
 local overflowCPU = ffi.new'char[1]'
 
-
 env:kernel{
 	argsOut = {buffer},
 	body = template([[ 
