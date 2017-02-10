@@ -20,9 +20,9 @@ local clnumber = require 'cl.obj.number'
 local Mouse = require 'gui.mouse'
 
 local modulo = 4
-local initValue = ffi.new('int[1]', 1)
-local drawValue = ffi.new('int[1]', 25)
 -- there's a bug with using more than 1<<16, so the 'b' and 'a' channels have something wrong in their math
+local initValue = ffi.new('int[1]', bit.lshift(1,17))
+local drawValue = ffi.new('int[1]', 25)
 local gridsize = assert(tonumber(arg[2] or 1024))
 
 local App = class(ImGuiApp)
@@ -57,9 +57,6 @@ function App:initGL()
 
 	gl.glClearColor(.2, .2, .2, 0)
 
-	ffi.fill(bufferCPU, ffi.sizeof'int' * gridsize * gridsize)
-	bufferCPU[bit.rshift(gridsize,1) + gridsize * bit.rshift(gridsize,1)] = initValue[0]
-	
 	pingpong = PingPong{
 		width = gridsize,
 		height = gridsize,
@@ -71,8 +68,7 @@ function App:initGL()
 		wrap = {
 			s = gl.GL_REPEAT,
 			t = gl.GL_REPEAT,
-		},
-		data = bufferCPU,
+		}
 	}
 	reset()
 
@@ -147,11 +143,9 @@ void main() {
 			}
 		),
 		uniforms = {
-			'tex',
+			tex = 0,
 		},
 	}
-	updateShader:use()
-	gl.glUniform1i(updateShader.uniforms.tex, 0)
 
 	displayShader = GLProgram{
 		vertexCode = [[
@@ -163,8 +157,7 @@ void main() {
 ]],
 		fragmentCode = template([[
 varying vec2 tc;
-uniform sampler2D tex;
-uniform sampler2D grad;
+uniform sampler2D tex, grad;
 void main() {
 	vec3 toppleColor = texture2D(tex, tc).rgb;
 	float value = toppleColor.r * <?=clnumber(256 / modulo)?>;
@@ -176,13 +169,10 @@ void main() {
 			}
 		),
 		uniforms = {
-			'tex',
-			'grad',
+			tex = 0,
+			grad = 1,
 		},
 	}
-	displayShader:use()
-	gl.glUniform1i(displayShader.uniforms.tex, 0)
-	gl.glUniform1i(displayShader.uniforms.grad, 1)
 
 	glreport 'here'
 end
