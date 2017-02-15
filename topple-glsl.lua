@@ -299,7 +299,7 @@ function App:updateGUI()
 	ig.igSameLine()
 
 	if ig.igButton'Load' then
-		local image = Image'output.gpu.png'
+		local image = Image'output.glsl.png'
 		assert(image.width == gridsize)
 		assert(image.height == gridsize)
 		assert(image.channels == 3)

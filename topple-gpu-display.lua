@@ -170,14 +170,10 @@ void main() {
 			}
 		),
 		uniforms = {
-			'tex',
-			'grad',
+			tex = 0,
+			grad = 1,
 		},
 	}
-	shader:use()
-	gl.glUniform1i(shader.uniforms.tex, 0)
-	gl.glUniform1i(shader.uniforms.grad, 1)
-	shader:useNone()
 	
 	glreport 'here'
 end
