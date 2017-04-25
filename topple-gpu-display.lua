@@ -1,6 +1,6 @@
 #!/usr/bin/env luajit
 local ffi = require 'ffi'
-local gl = require 'ffi.OpenGL'
+local gl = require 'gl'
 local ig = require 'ffi.imgui'
 local sdl = require 'ffi.sdl'
 local vec3ub = require 'ffi.vec.vec3ub'
