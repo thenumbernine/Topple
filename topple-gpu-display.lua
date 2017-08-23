@@ -1,10 +1,10 @@
 #!/usr/bin/env luajit
 local ffi = require 'ffi'
 local gl = require 'gl'
+local ig = require 'ffi.imgui'
 local sdl = require 'ffi.sdl'
 local vec3ub = require 'ffi.vec.vec3ub'
 local ImGuiApp = require 'imguiapp'
-local ig = require 'ffi.imgui'
 local class = require 'ext.class'
 local table = require 'ext.table'
 local vec2 = require 'vec.vec2'
@@ -20,8 +20,7 @@ local Image = require 'image'
 local toppleType = 'int'
 
 local modulo = 4
-local initValue = ffi.new(toppleType..'[1]', 1)
-local drawValue = ffi.new(toppleType..'[1]', 25)
+local initValue, drawValue
 local gridsize = assert(tonumber(arg[2] or 1024))
 
 local env, buffer, nextBuffer
@@ -76,11 +75,12 @@ function App:initGL()
 	App.super.initGL(self)
 
 	-- init env after GL init to get GL sharing access
-	env = CLEnv{
-		size = {gridsize, gridsize},
--- hmm, NVIDIA on Windows has been the worst yet ...
-useGLSharing = false,
-	}
+	env = CLEnv{size = {gridsize, gridsize}}
+
+	-- wait til after real is defined
+	initValue = ffi.new(toppleType..'[1]', 1)
+	drawValue = ffi.new(toppleType..'[1]', 25)
+	
 	buffer = env:buffer{name='buffer', type=toppleType}
 	nextBuffer = env:buffer{name='nextBuffer', type=toppleType}
 	bufferCPU = ffi.new(toppleType..'[?]', env.base.volume)
@@ -119,8 +119,6 @@ useGLSharing = false,
 
 	gl.glClearColor(.2, .2, .2, 0)
 
---	assert(toppleType == 'int')
-
 	grad = GLTex2D{
 		width = modulo,
 		height = 1,
@@ -148,9 +146,14 @@ useGLSharing = false,
 		-- so the texture will hold 8,8,8,8 RGBA
 		-- and only the 1st channel will hold anything relevant
 		-- This way I don't have to modulo each pixel or strip channels when copying.
+		
 		internalFormat = gl.GL_RGBA,
-		format = gl.GL_RGBA,
 		type = gl.GL_UNSIGNED_BYTE,
+		
+		--internalFormat = gl.GL_RGBA32F,
+		--type = gl.GL_FLOAT,
+		
+		format = gl.GL_RGBA,
 		minFilter = gl.GL_NEAREST,
 		magFilter = gl.GL_NEAREST,
 		wrap = {
@@ -163,20 +166,16 @@ useGLSharing = false,
 	if env.useGLSharing then 
 		local CLImageGL = require 'cl.imagegl'
 		texCLMem = CLImageGL{context=env.ctx, tex=tex, write=true}
-	
+
 		convertToTex = env:kernel{
-			argsOut = {{name='tex', obj=texCLMem.obj, type='image2d_t'}},
-			argsIn = {{name='buffer', obj=buffer.obj, type='unsigned char'}},
+			argsOut = {{name='tex', obj=texCLMem.obj, type='__write_only image2d_t'}},
+			argsIn = {{name='buffer', obj=buffer.obj, type='uchar4'}},
 			body = [[
-#if 0	
-	write_imagef(tex, 
-		(int2)(i.x, i.y),
-		(float4)(
-			(float)buffer[0+4*index]/255.,
-			(float)buffer[1+4*index]/255.,
-			(float)buffer[2+4*index]/255.,
-			(float)buffer[3+4*index]/255.));
-#endif
+	write_imagef(tex, i.xy, (float4)(
+		(float)buffer[index].s0 / 255.,
+		(float)buffer[index].s1 / 255.,
+		(float)buffer[index].s2 / 255.,
+		(float)buffer[index].s3 / 255.));
 ]]
 		}	
 		convertToTex:compile()
@@ -288,7 +287,9 @@ function App:update()
 	
 	tex:bind(0)
 	if env.useGLSharing then 
+		env.cmds:enqueueAcquireGLObjects{objs={texCLMem}}
 		convertToTex()
+		env.cmds:enqueueReleaseGLObjects{objs={texCLMem}}
 	else
 		buffer:toCPU(bufferCPU)
 		gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, gridsize, gridsize, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, bufferCPU)
