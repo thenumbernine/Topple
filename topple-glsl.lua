@@ -1,10 +1,10 @@
 #!/usr/bin/env luajit
 local ffi = require 'ffi'
-local gl = require 'gl'
-local ig = require 'ffi.imgui'
 local sdl = require 'ffi.sdl'
+local ig = require 'ffi.imgui'
+local gl = require 'gl'
+local ImGuiApp = require 'imguiapp'	-- on windows, imguiapp needs to be before ig...
 local vec3ub = require 'ffi.vec.vec3ub'
-local ImGuiApp = require 'imguiapp'
 local class = require 'ext.class'
 local table = require 'ext.table'
 local vec2 = require 'vec.vec2'
@@ -21,7 +21,7 @@ local Mouse = require 'gui.mouse'
 
 local modulo = 4
 -- there's a bug with using more than 1<<16, so the 'b' and 'a' channels have something wrong in their math
-local initValue = ffi.new('int[1]', bit.lshift(1,17))
+local initValue = ffi.new('int[1]', bit.lshift(1,tonumber(arg[1]) or 17))
 local drawValue = ffi.new('int[1]', 25)
 local gridsize = assert(tonumber(arg[2] or 1024))
 

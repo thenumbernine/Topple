@@ -1,10 +1,10 @@
 #!/usr/bin/env luajit
 local ffi = require 'ffi'
 local gl = require 'gl'
-local ig = require 'ffi.imgui'
 local sdl = require 'ffi.sdl'
 local vec3ub = require 'ffi.vec.vec3ub'
 local ImGuiApp = require 'imguiapp'
+local ig = require 'ffi.imgui'
 local class = require 'ext.class'
 local table = require 'ext.table'
 local vec2 = require 'vec.vec2'
@@ -24,10 +24,12 @@ local initValue = ffi.new(toppleType..'[1]', 1)
 local drawValue = ffi.new(toppleType..'[1]', 25)
 local gridsize = assert(tonumber(arg[2] or 1024))
 
-local env = CLEnv{size = {gridsize, gridsize}}
-local buffer = env:buffer{name='buffer', type=toppleType}
-local nextBuffer = env:buffer{name='nextBuffer', type=toppleType}
-local bufferCPU = ffi.new(toppleType..'[?]', env.base.volume)
+local env, buffer, nextBuffer
+local iterKernel, doubleKernel, convertToTex
+
+-- if GL sharing is enabled then this isn't needed ... 
+-- except for drawing ... which could be done in GL as well ...
+local bufferCPU	
 
 local totalSand = 0
 
@@ -37,38 +39,6 @@ local function reset()
 	buffer:fromCPU(bufferCPU)
 	totalSand = initValue[0]
 end
-
-reset()
-
-local iterKernel = env:kernel{
-	argsOut = {nextBuffer},
-	argsIn = {buffer},
-	body = template([[
-	<?=toppleType?> lastb = buffer[index];
-	global <?=toppleType?>* nextb = nextBuffer + index;
-	*nextb = lastb;
-	*nextb %= <?=modulo?>;
-	<? for side=0,1 do ?>{
-		if (i.s<?=side?> > 0) {
-			*nextb += buffer[index - stepsize.s<?=side?>] / <?=modulo?>;
-		}
-		if (i.s<?=side?> < size.s<?=side?>-1) {
-			*nextb += buffer[index + stepsize.s<?=side?>] / <?=modulo?>;
-		}
-	}<? end ?>
-]], {
-		toppleType = toppleType,
-		modulo = modulo,
-	}),
-}
-iterKernel:compile()
-
-local doubleKernel = env:kernel{
-	argsOut = {buffer},
-	body = [[
-	buffer[index] <<= 1;
-]],
-}
 
 local function double()
 	doubleKernel(buffer)
@@ -97,16 +67,59 @@ local colors = {
 assert(#colors == modulo)
 
 local tex, grad, shader
+local texCLMem
 
 local texsize = 1024
 assert(texsize >= gridsize)
 
 function App:initGL()
 	App.super.initGL(self)
-	
+
+	-- init env after GL init to get GL sharing access
+	env = CLEnv{
+		size = {gridsize, gridsize},
+-- hmm, NVIDIA on Windows has been the worst yet ...
+useGLSharing = false,
+	}
+	buffer = env:buffer{name='buffer', type=toppleType}
+	nextBuffer = env:buffer{name='nextBuffer', type=toppleType}
+	bufferCPU = ffi.new(toppleType..'[?]', env.base.volume)
+
+	iterKernel  = env:kernel{
+		argsOut = {nextBuffer},
+		argsIn = {buffer},
+		body = template([[
+	<?=toppleType?> lastb = buffer[index];
+	global <?=toppleType?>* nextb = nextBuffer + index;
+	*nextb = lastb;
+	*nextb %= <?=modulo?>;
+	<? for side=0,1 do ?>{
+		if (i.s<?=side?> > 0) {
+			*nextb += buffer[index - stepsize.s<?=side?>] / <?=modulo?>;
+		}
+		if (i.s<?=side?> < size.s<?=side?>-1) {
+			*nextb += buffer[index + stepsize.s<?=side?>] / <?=modulo?>;
+		}
+	}<? end ?>
+]], 	{
+			toppleType = toppleType,
+			modulo = modulo,
+		}),
+	}
+	iterKernel:compile()
+
+	doubleKernel = env:kernel{
+		argsOut = {buffer},
+		body = [[
+	buffer[index] <<= 1;
+]],
+	}
+
+	reset()
+
 	gl.glClearColor(.2, .2, .2, 0)
 
-	assert(toppleType == 'int')
+--	assert(toppleType == 'int')
 
 	grad = GLTex2D{
 		width = modulo,
@@ -146,6 +159,29 @@ function App:initGL()
 		},
 	}
 	tex:unbind()
+	
+	if env.useGLSharing then 
+		local CLImageGL = require 'cl.imagegl'
+		texCLMem = CLImageGL{context=env.ctx, tex=tex, write=true}
+	
+		convertToTex = env:kernel{
+			argsOut = {{name='tex', obj=texCLMem.obj, type='image2d_t'}},
+			argsIn = {{name='buffer', obj=buffer.obj, type='unsigned char'}},
+			body = [[
+#if 0	
+	write_imagef(tex, 
+		(int2)(i.x, i.y),
+		(float4)(
+			(float)buffer[0+4*index]/255.,
+			(float)buffer[1+4*index]/255.,
+			(float)buffer[2+4*index]/255.,
+			(float)buffer[3+4*index]/255.));
+#endif
+]]
+		}	
+		convertToTex:compile()
+		convertToTex.obj:setArgs(texCLMem, buffer)
+	end
 
 	shader = GLProgram{
 		vertexCode = [[
@@ -191,18 +227,42 @@ function App:update()
 	if canHandleMouse then 
 		mouse:update()
 		if mouse.leftDown then
+			buffer:toCPU(bufferCPU)
+			
 			local pos = (mouse.pos - vec2(.5, .5)) * (2 / zoom)
 			pos[1] = pos[1] * ar
 			pos = ((pos + viewPos) * .5 + vec2(.5, .5)) * gridsize
-			local x = math.floor(pos[1] + .5)
-			local y = math.floor(pos[2] + .5)
-			if x >= 0 and x < gridsize and y >= 0 and y < gridsize then
-				buffer:toCPU(bufferCPU)
-				local ptr = bufferCPU + (x + gridsize * y)
-				ptr[0] = ptr[0] + drawValue[0]
-				totalSand = totalSand + drawValue[0]
-				buffer:fromCPU(bufferCPU)
+			local curX = math.floor(pos[1] + .5)
+			local curY = math.floor(pos[2] + .5)
+			
+			local lastPos = (mouse.lastPos - vec2(.5, .5)) * (2 / zoom)
+			lastPos[1] = lastPos[1] * ar
+			lastPos = ((lastPos + viewPos) * .5 + vec2(.5, .5)) * gridsize
+			local lastX = math.floor(lastPos[1] + .5)
+			local lastY = math.floor(lastPos[2] + .5)
+		
+			local dx = curX - lastX
+			local dy = curY - lastY
+			local ds = math.ceil(math.max(math.abs(dx), math.abs(dy), 1))
+			for s=0,ds do
+				local f = s/ds
+				local x = math.floor(lastX + dx * f + .5)
+				local y = math.floor(lastY + dy * f + .5)
+			
+				if x >= 0 and x < gridsize and y >= 0 and y < gridsize then
+					local ptr = bufferCPU + (x + gridsize * y)
+					if leftShiftDown or rightShiftDown then
+						local oldValue = ptr[0]
+						ptr[0] = math.max(0, ptr[0] - drawValue[0])
+						totalSand = totalSand + (ptr[0] - oldValue)
+					else
+						ptr[0] = ptr[0] + drawValue[0]
+						totalSand = totalSand + drawValue[0]
+					end
+				end
 			end
+					
+			buffer:fromCPU(bufferCPU)
 		end
 		if mouse.rightDragging then
 			if leftShiftDown or rightShiftDown then
@@ -225,11 +285,16 @@ function App:update()
 	gl.glTranslated(-viewPos[1], -viewPos[2], 0)
 
 	iterate()
-	buffer:toCPU(bufferCPU)
+	
+	tex:bind(0)
+	if env.useGLSharing then 
+		convertToTex()
+	else
+		buffer:toCPU(bufferCPU)
+		gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, gridsize, gridsize, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, bufferCPU)
+	end
 	
 	shader:use()
-	tex:bind(0)
-	gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, gridsize, gridsize, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, bufferCPU)
 	grad:bind(1)
 
 	gl.glBegin(gl.GL_TRIANGLE_STRIP)
