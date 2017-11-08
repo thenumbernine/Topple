@@ -1,5 +1,5 @@
 #include <Tensor/Grid.h>
-#include <Image/System.h>
+#include <Image/Image.h>
 #include <Parallel/Parallel.h>
 #include <Common/Exception.h>
 #include <chrono>
@@ -109,10 +109,10 @@ void test2(int modulo, int initialstack, vec2i size) {
 	vec2i place = size/2;
 	
 	std::vector<Entry> entries;
-	entries.push_back(place, initialstack);
+	entries.push_back(Entry(place, initialstack));
 	
 	//map from thread ID to vector of new entries
-	std::map<int, std::vector<Entry>> nextEntriesForThread;
+	std::map<std::thread::id, std::vector<Entry>> nextEntriesForThread;
 
 	//next iteration's entries (all nextEntriesForThread combined)
 	std::vector<Entry> nextEntries;
@@ -123,7 +123,7 @@ void test2(int modulo, int initialstack, vec2i size) {
 	int maxNbhdSize = 0;
 	for (;;) {
 		//clear the new entries
-		parallel.foreach(nextEntriesForThread.begin(), nextEntriesForThead.end(), [&](std::pair<int, std::vector<Entry>> &pair) {
+		parallel.foreach(nextEntriesForThread.begin(), nextEntriesForThread.end(), [&](std::pair<int, std::vector<Entry>> &pair) {
 			pair.second.resize(0);
 		});
 	
@@ -140,7 +140,7 @@ void test2(int modulo, int initialstack, vec2i size) {
 				nextEntriesForThisThread.push_back(Entry(entry.pos, whatsleft));
 				++iteration;
 				for (vec2i edge : edges) {
-					vec2i n = i + edge;
+					vec2i n = entry.pos + edge;
 					if (n(0) < 0 || n(1) < 0 || n(0) >= size(0) || n(1) >= size(1)) continue;
 					nextEntriesForThisThread.push_back(Entry(n, nbhsget));
 				}
@@ -156,14 +156,14 @@ void test2(int modulo, int initialstack, vec2i size) {
 		//but otherwise they'll clog up the overflow pass - because they don't have any overflow
 
 		entries.resize(0);
-		parallel.foreach(nextEntriesForThread.begin(), nextEntriesForThead.end(), [&](std::pair<int, std::vector<Entry>> &pair) {
+		parallel.foreach(nextEntriesForThread.begin(), nextEntriesForThread.end(), [&](std::pair<int, std::vector<Entry>> &pair) {
 			entries.insert(nextEntries.end(), pair.second.begin(), pair.second.end());
 		});
 		
 		if (!moved) break;
 		
 		std::sort(entries.begin(), entries.end(), [&](const Entry& a, const Entry& b) -> bool {
-			return a(0) + size(0) * a(1) < b(0) + size(0) * b(1);
+			return a.pos(0) + size(0) * a.pos(1) < b.pos(0) + size(0) * b.pos(1);
 		});
 	
 		std::vector<Entry>::reverse_iterator lasti, i;
