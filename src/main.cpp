@@ -5,10 +5,10 @@
 #include <chrono>
 #include <map>
 
-typedef ::Tensor::Grid<int, 2> Grid;
-typedef ::Tensor::Vector<int, 2> vec2i;
-typedef ::Tensor::Vector<unsigned char, 3> Color;
-typedef std::chrono::high_resolution_clock Clock;
+using Grid = ::Tensor::Grid<int, 2>;
+using vec2i = ::Tensor::Vector<int, 2>;
+using Color = ::Tensor::Vector<unsigned char, 3>;
+using Clock = std::chrono::high_resolution_clock;
 
 std::vector<Color> colors = {
 	Color(0,0,0),
@@ -33,7 +33,7 @@ void test1(int modulo, int initialstack, vec2i size) {
 
 
 	struct compare {
-		bool operator()(const vec2i& a, const vec2i& b) {
+		bool operator()(const vec2i& a, const vec2i& b) const {
 			if (a(0) == b(0)) return a(1) < b(1);
 			return a(0) < b(0);
 		}
@@ -93,6 +93,7 @@ void test1(int modulo, int initialstack, vec2i size) {
 }
 
 //only updates dirty cells, uses multiple threads
+#if 0
 void test2(int modulo, int initialstack, vec2i size) {
 	::Parallel::Parallel parallel(4);
 	if ((int)colors.size() < modulo) throw Common::Exception() << "not enough colors";
@@ -165,7 +166,8 @@ void test2(int modulo, int initialstack, vec2i size) {
 		std::sort(entries.begin(), entries.end(), [&](const Entry& a, const Entry& b) -> bool {
 			return a.pos(0) + size(0) * a.pos(1) < b.pos(0) + size(0) * b.pos(1);
 		});
-	
+
+#if 0 //can't erase reverse iterators?!
 		std::vector<Entry>::reverse_iterator lasti, i;
 		for (i = entries.rbegin(); i != entries.rend(); lasti = i, ++i) {
 			if (lasti->pos == i->pos) {
@@ -173,6 +175,14 @@ void test2(int modulo, int initialstack, vec2i size) {
 				entries.erase(lasti);
 			}
 		}
+#else
+		for (int i = entries.size()-1; i >= 0; --i) {
+			if (entries[i].pos == entries[i+1].pos) {
+				entries[i].amount += entries[i+1].amount;
+				entries.erase(entries.begin() + i+1);
+			}
+		}
+#endif
 	}
 	auto endTime = Clock::now();
 	std::chrono::duration<double, std::milli> milliseconds = endTime - startTime;
@@ -191,6 +201,7 @@ void test2(int modulo, int initialstack, vec2i size) {
 
 	Image::system->write("output.cpu.png", image);
 }
+#endif
 
 int main(int argc, char** argv) {	
 
