@@ -24,7 +24,7 @@ local toppleType = 'int'
 
 local modulo = 6
 local initValue, drawValue
-local gridsize = assert(tonumber(arg[2] or 64))
+local gridsize = assert(tonumber(arg[2] or 256))
 
 local env, buffer, nextBuffer
 local iterKernel, doubleKernel, convertToTex
@@ -125,17 +125,18 @@ function App:initGL()
 
 	gl.glClearColor(0,0,0,0)
 
-	local graddata = ffi.new('unsigned char[?]', modulo * 3)
+	local graddata = ffi.new('unsigned char[?]', modulo * 4)
 	for i=0,modulo-1 do
-		graddata[0+3*i] = colors[i+1].x
-		graddata[1+3*i] = colors[i+1].y
-		graddata[2+3*i] = colors[i+1].z
+		graddata[0+4*i] = colors[i+1].x
+		graddata[1+4*i] = colors[i+1].y
+		graddata[2+4*i] = colors[i+1].z
+		graddata[3+4*i] = i == 0 and 0 or 255
 	end
 	grad = GLTex2D{
 		width = modulo,
 		height = 1,
-		internalFormat = gl.GL_RGB,
-		format = gl.GL_RGB,
+		internalFormat = gl.GL_RGBA,
+		format = gl.GL_RGBA,
 		type = gl.GL_UNSIGNED_BYTE,
 		minFilter = gl.GL_NEAREST,
 		magFilter = gl.GL_NEAREST,
@@ -206,10 +207,12 @@ void main() {
 varying vec3 tc;
 uniform sampler3D tex;
 uniform sampler2D grad;
+uniform float alpha;
 void main() {
 	vec3 toppleColor = texture3D(tex, tc).rgb;
 	float value = toppleColor.r * <?=clnumber(256 / modulo)?>;
 	gl_FragColor = texture2D(grad, vec2(value + <?=clnumber(.5 / modulo)?>, .5));
+	gl_FragColor.a *= alpha;
 }
 ]],			{
 				clnumber = clnumber,
@@ -225,6 +228,7 @@ void main() {
 	glreport 'here'
 end
 
+local alpha = ffi.new('float[1]', .1)
 local iteration = 1
 local leftShiftDown
 local rightShiftDown 
@@ -307,14 +311,17 @@ function App:update()
 	end
 	
 	shader:use()
+	gl.glUniform1f(shader.uniforms.alpha.loc, alpha[0])
 	grad:bind(1)
 
 	--gl.glEnable(gl.GL_DEPTH_TEST)
 	-- [[
 	gl.glDisable(gl.GL_DEPTH_TEST)
 	gl.glEnable(gl.GL_BLEND)
-	gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE)
+	gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
 	--]]
+	
+	--[[ draw points
 	gl.glPointSize(3)
 	gl.glBegin(gl.GL_POINTS)
 	for i=1,gridsize do
@@ -332,6 +339,39 @@ function App:update()
 		end
 	end
 	gl.glEnd()
+	--]]
+	-- [[
+	local numslices = gridsize
+	local n = numslices
+	local fwd = -self.view.angle:zAxis()
+	local fwddir = select(2, table(fwd):map(math.abs):sup())
+	local jmin, jmax, jdir
+	if fwd[fwddir] < 0 then
+		jmin, jmax, jdir = 0, n, 1
+	else
+		jmin, jmax, jdir = n, 0, -1
+	end
+
+	local vertexesInQuad = {{0,0},{1,0},{1,1},{0,1}}
+
+	gl.glBegin(gl.GL_QUADS)
+	for j=jmin,jmax,jdir do
+		local f = (j+.5)/n
+		for _,vtx in ipairs(vertexesInQuad) do
+			if fwddir == 1 then
+				gl.glTexCoord3f(f, vtx[1], vtx[2])
+				gl.glVertex3f(2*f-1, 2*vtx[1]-1, 2*vtx[2]-1)
+			elseif fwddir == 2 then
+				gl.glTexCoord3f(vtx[1], f, vtx[2])
+				gl.glVertex3f(2*vtx[1]-1, 2*f-1, 2*vtx[2]-1)
+			elseif fwddir == 3 then
+				gl.glTexCoord3f(vtx[1], vtx[2], f)
+				gl.glVertex3f(2*vtx[1]-1, 2*vtx[2]-1, 2*f-1)
+			end
+		end
+	end
+	gl.glEnd()
+	--]]
 	gl.glDisable(gl.GL_DEPTH_TEST)
 
 	grad:unbind(1)
@@ -368,17 +408,20 @@ function App:updateGUI()
 	
 	ig.igInputInt('initial value', initValue)	
 	ig.igInputInt('draw value', drawValue)
+	ig.igInputFloat('alpha', alpha)
 
-	--[[
 	if ig.igButton'Save' then
 		buffer:toCPU(bufferCPU)
-		Image(gridsize, gridsize, 3, 'unsigned char', function(x,y)
-				local value = bufferCPU[x + env.base.size.x * y]
+		Image(gridsize*gridsize, gridsize, 3, 'unsigned char', function(xz,y)
+				local x = xz % gridsize
+				local y = math.floor(xz / gridsize)
+				local value = bufferCPU[x + gridsize * (y + gridsize * z)]
 				value = value % modulo
 				return colors[value+1]:unpack()
 		end):save'output.gpu.png'
 	end
 
+	--[[
 	ig.igSameLine()
 
 	if ig.igButton'Load' then

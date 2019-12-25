@@ -4,6 +4,8 @@ Seen on [numberphile](https://www.youtube.com/watch?v=1MtEUErz7Gg)
 
 ![](images/1048576.png)
 
+![](images/3D.png)
+
 CPU version flags and updates only dirty cells.
 
 GPU version processes all at once.
