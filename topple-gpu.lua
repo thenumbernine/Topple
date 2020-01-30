@@ -1,6 +1,6 @@
 #!/usr/bin/env luajit
 local ffi = require 'ffi'
-local vec3ub = require 'ffi.vec.vec3ub'
+local vec3ub = require 'vec-ffi.vec3ub'
 local template = require 'template'
 
 local toppleType = 'int'
