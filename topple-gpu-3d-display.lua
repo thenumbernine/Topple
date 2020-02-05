@@ -6,11 +6,11 @@ local sdl = require 'ffi.sdl'
 local vec3ub = require 'vec-ffi.vec3ub'
 local View = require 'glapp.view'
 local Orbit = require 'glapp.orbit'
+local Mouse = require 'glapp.mouse'
 local ImGuiApp = require 'imguiapp'
 local class = require 'ext.class'
 local table = require 'ext.table'
 local vec2 = require 'vec.vec2'
-local Mouse = require 'gui.mouse'
 local CLEnv = require 'cl.obj.env'
 local clnumber = require 'cl.obj.number'
 local GLTex2D = require 'gl.tex2d'
@@ -245,13 +245,13 @@ function App:update()
 		if mouse.leftDown then
 			buffer:toCPU(bufferCPU)
 			
-			local pos = (mouse.pos - vec2(.5, .5)) * (2 / zoom)
+			local pos = (vec2(mouse.pos:unpack()) - vec2(.5, .5)) * (2 / zoom)
 			pos[1] = pos[1] * ar
 			pos = ((pos + viewPos) * .5 + vec2(.5, .5)) * gridsize
 			local curX = math.floor(pos[1] + .5)
 			local curY = math.floor(pos[2] + .5)
 			
-			local lastPos = (mouse.lastPos - vec2(.5, .5)) * (2 / zoom)
+			local lastPos = (vec2(mouse.lastPos:unpack()) - vec2(.5, .5)) * (2 / zoom)
 			lastPos[1] = lastPos[1] * ar
 			lastPos = ((lastPos + viewPos) * .5 + vec2(.5, .5)) * gridsize
 			local lastX = math.floor(lastPos[1] + .5)
@@ -282,9 +282,9 @@ function App:update()
 		end
 		if mouse.rightDragging then
 			if leftShiftDown or rightShiftDown then
-				zoom = zoom * math.exp(10 * mouse.deltaPos[2])
+				zoom = zoom * math.exp(10 * mouse.deltaPos.y)
 			else
-				viewPos = viewPos - vec2(mouse.deltaPos[1] * ar, mouse.deltaPos[2]) * (2 / zoom)
+				viewPos = viewPos - vec2(mouse.deltaPos.x * ar, mouse.deltaPos.y) * (2 / zoom)
 			end
 		end
 	end

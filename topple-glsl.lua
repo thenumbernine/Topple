@@ -17,7 +17,7 @@ local template = require 'template'
 local Image = require 'image'
 -- isle of misfits:
 local clnumber = require 'cl.obj.number'
-local Mouse = require 'gui.mouse'
+local Mouse = require 'glapp.mouse'
 
 local modulo = 4
 -- there's a bug with using more than 1<<16, so the 'b' and 'a' channels have something wrong in their math
@@ -190,7 +190,7 @@ function App:update()
 	if canHandleMouse then 
 		mouse:update()
 		if mouse.leftDown then
-			local pos = (mouse.pos - vec2(.5, .5)) * (2 / zoom)
+			local pos = (vec2(mouse.pos:unpack()) - vec2(.5, .5)) * (2 / zoom)
 			pos[1] = pos[1] * ar
 			pos = ((pos + viewPos) * .5 + vec2(.5, .5)) * gridsize
 			local x = math.floor(pos[1] + .5)
@@ -211,9 +211,9 @@ function App:update()
 		end
 		if mouse.rightDragging then
 			if leftShiftDown or rightShiftDown then
-				zoom = zoom * math.exp(10 * mouse.deltaPos[2])
+				zoom = zoom * math.exp(10 * mouse.deltaPos.y)
 			else
-				viewPos = viewPos - vec2(mouse.deltaPos[1] * ar, mouse.deltaPos[2]) * (2 / zoom)
+				viewPos = viewPos - vec2(mouse.deltaPos.x * ar, mouse.deltaPos.y) * (2 / zoom)
 			end
 		end
 	end
