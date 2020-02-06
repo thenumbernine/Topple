@@ -4,13 +4,10 @@ local gl = require 'gl'
 local ig = require 'ffi.imgui'
 local sdl = require 'ffi.sdl'
 local vec3ub = require 'vec-ffi.vec3ub'
-local View = require 'glapp.view'
-local Orbit = require 'glapp.orbit'
-local Mouse = require 'glapp.mouse'
 local ImGuiApp = require 'imguiapp'
 local class = require 'ext.class'
 local table = require 'ext.table'
-local vec2 = require 'vec.vec2'
+local vec2d = require 'vec-ffi.vec2d'
 local CLEnv = require 'cl.obj.env'
 local clnumber = require 'cl.obj.number'
 local GLTex2D = require 'gl.tex2d'
@@ -56,9 +53,7 @@ local function iterate()
 	buffer, nextBuffer = nextBuffer, buffer
 end
 
-local mouse = Mouse()
-
-local App = Orbit(View.apply(class(ImGuiApp)))
+local App = require 'glapp.orbit-view'(ImGuiApp)
 
 local colors = {
 	vec3ub(0,0,0),
@@ -234,28 +229,28 @@ local leftShiftDown
 local rightShiftDown 
 local zoomFactor = .9
 local zoom = 1
-local viewPos = vec2(0,0)
+local viewPos = vec2d(0,0)
 function App:update()
 	local ar = self.width / self.height
 
 	--[[
 	local canHandleMouse = not ig.igGetIO()[0].WantCaptureMouse
 	if canHandleMouse then 
-		mouse:update()
-		if mouse.leftDown then
+		self.mouse:update()
+		if self.mouse.leftDown then
 			buffer:toCPU(bufferCPU)
 			
-			local pos = (vec2(mouse.pos:unpack()) - vec2(.5, .5)) * (2 / zoom)
-			pos[1] = pos[1] * ar
-			pos = ((pos + viewPos) * .5 + vec2(.5, .5)) * gridsize
-			local curX = math.floor(pos[1] + .5)
-			local curY = math.floor(pos[2] + .5)
+			local pos = (self.mouse.pos - vec2d(.5, .5)) * (2 / zoom)
+			pos.x = pos.x * ar
+			pos = ((pos + viewPos) * .5 + vec2d(.5, .5)) * gridsize
+			local curX = math.floor(pos.x + .5)
+			local curY = math.floor(pos.y + .5)
 			
-			local lastPos = (vec2(mouse.lastPos:unpack()) - vec2(.5, .5)) * (2 / zoom)
-			lastPos[1] = lastPos[1] * ar
-			lastPos = ((lastPos + viewPos) * .5 + vec2(.5, .5)) * gridsize
-			local lastX = math.floor(lastPos[1] + .5)
-			local lastY = math.floor(lastPos[2] + .5)
+			local lastPos = (self.mouse.lastPos - vec2d(.5, .5)) * (2 / zoom)
+			lastPos.x = lastPos.x * ar
+			lastPos = ((lastPos + viewPos) * .5 + vec2d(.5, .5)) * gridsize
+			local lastX = math.floor(lastPos.x + .5)
+			local lastY = math.floor(lastPos.y + .5)
 		
 			local dx = curX - lastX
 			local dy = curY - lastY
@@ -280,11 +275,11 @@ function App:update()
 					
 			buffer:fromCPU(bufferCPU)
 		end
-		if mouse.rightDragging then
+		if self.mouse.rightDragging then
 			if leftShiftDown or rightShiftDown then
-				zoom = zoom * math.exp(10 * mouse.deltaPos.y)
+				zoom = zoom * math.exp(10 * self.mouse.deltaPos.y)
 			else
-				viewPos = viewPos - vec2(mouse.deltaPos.x * ar, mouse.deltaPos.y) * (2 / zoom)
+				viewPos = viewPos - vec2d(self.mouse.deltaPos.x * ar, self.mouse.deltaPos.y) * (2 / zoom)
 			end
 		end
 	end
@@ -344,9 +339,9 @@ function App:update()
 	local numslices = gridsize
 	local n = numslices
 	local fwd = -self.view.angle:zAxis()
-	local fwddir = select(2, table(fwd):map(math.abs):sup())
+	local fwddir = select(2, table{fwd:unpack()}:map(math.abs):sup())
 	local jmin, jmax, jdir
-	if fwd[fwddir] < 0 then
+	if fwd.s[fwddir-1] < 0 then
 		jmin, jmax, jdir = 0, n, 1
 	else
 		jmin, jmax, jdir = n, 0, -1
