@@ -4,7 +4,6 @@ local gl = require 'gl'
 local ig = require 'ffi.imgui'
 local sdl = require 'ffi.sdl'
 local vec3ub = require 'vec-ffi.vec3ub'
-local ImGuiApp = require 'imguiapp'
 local class = require 'ext.class'
 local table = require 'ext.table'
 local vec2d = require 'vec-ffi.vec2d'
@@ -53,7 +52,7 @@ local function iterate()
 	buffer, nextBuffer = nextBuffer, buffer
 end
 
-local App = require 'glapp.orbit'(ImGuiApp)
+local App = class(require 'glapp.orbit'(require 'imguiapp'))
 
 local colors = {
 	vec3ub(0,0,0),
