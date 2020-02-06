@@ -53,7 +53,7 @@ local function iterate()
 	buffer, nextBuffer = nextBuffer, buffer
 end
 
-local App = require 'glapp.orbit-view'(ImGuiApp)
+local App = require 'glapp.orbit'(ImGuiApp)
 
 local colors = {
 	vec3ub(0,0,0),
