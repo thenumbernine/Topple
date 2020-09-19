@@ -1,7 +1,7 @@
 #!/usr/bin/env lua
 require 'ext'
 
-if not io.fileexists'results.txt' then
+if not os.fileexists'results.txt' then
 	print('no results found -- performing performance test')
 	os.execute('./test.lua')
 end
