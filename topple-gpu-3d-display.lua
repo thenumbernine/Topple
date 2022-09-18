@@ -1,7 +1,7 @@
 #!/usr/bin/env luajit
 local ffi = require 'ffi'
 local gl = require 'gl'
-local ig = require 'ffi.imgui'
+local ig = require 'imgui'
 local sdl = require 'ffi.sdl'
 local vec3ub = require 'vec-ffi.vec3ub'
 local class = require 'ext.class'
@@ -19,7 +19,8 @@ local Image = require 'image'
 local toppleType = 'int'
 
 local modulo = 6
-local initValue, drawValue
+initValue = 1
+drawValue = 25
 local gridsize = assert(tonumber(arg[2] or 256))
 
 local env, buffer, nextBuffer
@@ -33,9 +34,9 @@ local totalSand = 0
 
 local function reset()
 	ffi.fill(bufferCPU, ffi.sizeof(toppleType) * gridsize * gridsize * gridsize)
-	bufferCPU[bit.rshift(gridsize,1) + gridsize * (bit.rshift(gridsize,1) + gridsize * bit.rshift(gridsize,1))] = initValue[0]
+	bufferCPU[bit.rshift(gridsize,1) + gridsize * (bit.rshift(gridsize,1) + gridsize * bit.rshift(gridsize,1))] = initValue
 	buffer:fromCPU(bufferCPU)
-	totalSand = initValue[0]
+	totalSand = initValue
 end
 
 local function double()
@@ -76,10 +77,6 @@ function App:initGL()
 
 	-- init env after GL init to get GL sharing access
 	env = CLEnv{size = {gridsize, gridsize, gridsize}}
-
-	-- wait til after real is defined
-	initValue = ffi.new(toppleType..'[1]', 1)
-	drawValue = ffi.new(toppleType..'[1]', 25)
 	
 	buffer = env:buffer{name='buffer', type=toppleType}
 	nextBuffer = env:buffer{name='nextBuffer', type=toppleType}
@@ -222,7 +219,7 @@ void main() {
 	glreport 'here'
 end
 
-local alpha = ffi.new('float[1]', .1)
+alpha = .1
 local iteration = 1
 local leftShiftDown
 local rightShiftDown 
@@ -263,11 +260,11 @@ function App:update()
 					local ptr = bufferCPU + (x + gridsize * y)
 					if leftShiftDown or rightShiftDown then
 						local oldValue = ptr[0]
-						ptr[0] = math.max(0, ptr[0] - drawValue[0])
+						ptr[0] = math.max(0, ptr[0] - drawValue)
 						totalSand = totalSand + (ptr[0] - oldValue)
 					else
-						ptr[0] = ptr[0] + drawValue[0]
-						totalSand = totalSand + drawValue[0]
+						ptr[0] = ptr[0] + drawValue
+						totalSand = totalSand + drawValue
 					end
 				end
 			end
@@ -305,7 +302,7 @@ function App:update()
 	end
 	
 	shader:use()
-	gl.glUniform1f(shader.uniforms.alpha.loc, alpha[0])
+	gl.glUniform1f(shader.uniforms.alpha.loc, alpha)
 	grad:bind(1)
 
 	--gl.glEnable(gl.GL_DEPTH_TEST)
@@ -400,9 +397,9 @@ end
 function App:updateGUI()
 	ig.igText('total sand: '..totalSand)
 	
-	ig.igInputInt('initial value', initValue)	
-	ig.igInputInt('draw value', drawValue)
-	ig.igInputFloat('alpha', alpha)
+	ig.luatableInputInt('initial value', _G, 'initValue')
+	ig.luatableInputInt('draw value', _G, 'drawValue')
+	ig.luatableInputFloat('alpha', _G, 'alpha')
 
 	if ig.igButton'Save' then
 		buffer:toCPU(bufferCPU)

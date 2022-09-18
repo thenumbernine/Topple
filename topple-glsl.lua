@@ -1,7 +1,7 @@
 #!/usr/bin/env luajit
 local ffi = require 'ffi'
 local sdl = require 'ffi.sdl'
-local ig = require 'ffi.imgui'
+local ig = require 'imgui'
 local gl = require 'gl'
 local ImGuiApp = require 'imguiapp'	-- on windows, imguiapp needs to be before ig...
 local vec3ub = require 'vec-ffi.vec3ub'
@@ -21,8 +21,8 @@ local Mouse = require 'glapp.mouse'
 
 local modulo = 4
 -- there's a bug with using more than 1<<16, so the 'b' and 'a' channels have something wrong in their math
-local initValue = ffi.new('int[1]', bit.lshift(1,tonumber(arg[1]) or 17))
-local drawValue = ffi.new('int[1]', 25)
+initValue = bit.lshift(1,tonumber(arg[1]) or 17)
+drawValue = 25
 local gridsize = assert(tonumber(arg[2] or 1024))
 
 local App = class(ImGuiApp)
@@ -45,11 +45,11 @@ local totalSand = 0
 
 local function reset()
 	ffi.fill(bufferCPU, ffi.sizeof'int' * gridsize * gridsize)
-	bufferCPU[bit.rshift(gridsize,1) + gridsize * bit.rshift(gridsize,1)] = initValue[0]
+	bufferCPU[bit.rshift(gridsize,1) + gridsize * bit.rshift(gridsize,1)] = initValue
 	pingpong:prev():bind(0)
 	gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, gridsize, gridsize, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, bufferCPU)
 	pingpong:prev():unbind(0)
-	totalSand = initValue[0]
+	totalSand = initValue
 end
 
 function App:initGL()
@@ -183,6 +183,7 @@ local zoomFactor = .9
 local zoom = 1
 local viewPos = vec2(0,0)
 
+local value = ffi.new('int[1]', 0)
 function App:update()
 	local ar = self.width / self.height
 	
@@ -196,17 +197,16 @@ function App:update()
 			local x = math.floor(pos[1] + .5)
 			local y = math.floor(pos[2] + .5)
 			if x >= 0 and x < gridsize and y >= 0 and y < gridsize then
-				local value = ffi.new('int[1]', 0)
 				pingpong:draw{
 					callback = function()
 						gl.glReadPixels(x, y, 1, 1, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, value)
-						value[0] = value[0] + drawValue[0]
+						value[0] = value[0] + drawValue
 					end,
 				}
 				pingpong:prev():bind(0)
 				gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, x, y, 1, 1, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, value)
 				pingpong:prev():unbind(0)
-				totalSand = totalSand + drawValue[0]
+				totalSand = totalSand + drawValue
 			end
 		end
 		if mouse.rightDragging then
@@ -282,8 +282,8 @@ end
 function App:updateGUI()
 	ig.igText('total sand: '..totalSand)
 	
-	ig.igInputInt('initial value', initValue)
-	ig.igInputInt('draw value', drawValue)
+	ig.luatableInputInt('initial value', _G, 'initValue')
+	ig.luatableInputInt('draw value', _G, 'drawValue')
 	
 	if ig.igButton'Save' then
 		pingpong:prev():bind(0)	-- prev? shouldn't this be cur?
