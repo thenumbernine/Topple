@@ -53,7 +53,7 @@ local function iterate()
 	buffer, nextBuffer = nextBuffer, buffer
 end
 
-local App = class(require 'glapp.orbit'(require 'imguiapp'))
+local App = require 'imguiapp.withorbit'()
 
 local colors = {
 	vec3ub(0,0,0),
