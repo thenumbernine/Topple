@@ -6,8 +6,8 @@
 #include <map>
 
 using Grid = ::Tensor::Grid<int, 2>;
-using vec2i = ::Tensor::Vector<int, 2>;
-using Color = ::Tensor::Vector<unsigned char, 3>;
+using vec2i = ::Tensor::int2;
+using Color = ::Tensor::uchar3;
 using Clock = std::chrono::high_resolution_clock;
 
 std::vector<Color> colors = {
@@ -18,10 +18,10 @@ std::vector<Color> colors = {
 };
 
 std::vector<vec2i> edges = {
-	vec2i(-1,0),
-	vec2i(1,0),
-	vec2i(0,-1),
-	vec2i(0,1),
+	{-1,0},
+	{1,0},
+	{0,-1},
+	{0,1},
 };
 
 
@@ -33,9 +33,9 @@ void test1(int modulo, int initialstack, vec2i size) {
 
 
 	struct compare {
-		bool operator()(const vec2i& a, const vec2i& b) const {
-			if (a(0) == b(0)) return a(1) < b(1);
-			return a(0) < b(0);
+		bool operator()(vec2i const & a, vec2i const & b) const {
+			if (a.x == b.x) return a.y < b.y;
+			return a.x < b.x;
 		}
 	};
 	std::map<vec2i, bool, compare> dirty;
@@ -64,7 +64,7 @@ void test1(int modulo, int initialstack, vec2i size) {
 
 		for (vec2i edge : edges) {
 			vec2i n = i + edge;
-			if (n(0) < 0 || n(1) < 0 || n(0) >= size(0) || n(1) >= size(1)) continue;
+			if (n.x < 0 || n.y < 0 || n.x >= size.x || n.y >= size.y) continue;
 			int& neighbor = topple(n);
 			neighbor += nbhsget;
 			if (neighbor >= modulo) {
@@ -85,7 +85,7 @@ void test1(int modulo, int initialstack, vec2i size) {
 		int amt = topple(i);
 		Color color = colors[amt];
 		for (int ch = 0; ch < 3; ++ch) {
-			(*image)(i(0), i(1), ch) = color(ch);
+			(*image)(i.x, i.y, ch) = color(ch);
 		}
 	});
 
@@ -207,13 +207,13 @@ int main(int argc, char** argv) {
 
 	int modulo = 4;
 	int initialstack = 1<<10;
-	vec2i size(1001, 1001);
+	vec2i size = {1001, 1001};
 	
 	if (argc > 1) {
 		initialstack = atoi(argv[1]);
 	}
 	if (argc > 2) {
-		size(0) = size(1) = atoi(argv[2]);
+		size.x = size.y = atoi(argv[2]);
 	}
 
 	test1(modulo, initialstack, size);
