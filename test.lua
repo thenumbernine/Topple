@@ -24,6 +24,6 @@ for i=10,15,.5 do
 	print('gpu iterations:', iterations)
 end
 
-file('results.txt'):write(range(#sizes):map(function(i)
+path'results.txt':write(range(#sizes):map(function(i)
 	return table{sizes[i], cputimes[i], gputimes[i]}:concat'\t'
 end):concat'\n')
