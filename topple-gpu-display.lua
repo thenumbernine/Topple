@@ -2,7 +2,7 @@
 local ffi = require 'ffi'
 local gl = require 'gl'
 local ig = require 'imgui'
-local sdl = require 'ffi.sdl'
+local sdl = require 'ffi.req' 'sdl'
 local vec3ub = require 'vec-ffi.vec3ub'
 local ImGuiApp = require 'imguiapp'
 local class = require 'ext.class'

@@ -1,6 +1,6 @@
 #!/usr/bin/env luajit
 local ffi = require 'ffi'
-local sdl = require 'ffi.sdl'
+local sdl = require 'ffi.req' 'sdl'
 local ig = require 'imgui'
 local gl = require 'gl'
 local ImGuiApp = require 'imguiapp'	-- on windows, imguiapp needs to be before ig...
