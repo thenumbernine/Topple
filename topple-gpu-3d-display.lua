@@ -214,7 +214,7 @@ void main() {
 			tex = 0,
 			grad = 1,
 		},
-	}
+	}:useNone()
 	
 	glreport 'here'
 end

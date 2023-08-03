@@ -145,7 +145,7 @@ void main() {
 		uniforms = {
 			tex = 0,
 		},
-	}
+	}:useNone()
 
 	displayShader = GLProgram{
 		vertexCode = [[
@@ -172,7 +172,7 @@ void main() {
 			tex = 0,
 			grad = 1,
 		},
-	}
+	}:useNone()
 
 	glreport 'here'
 end
