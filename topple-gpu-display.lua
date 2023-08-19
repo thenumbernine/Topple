@@ -5,7 +5,6 @@ local ig = require 'imgui'
 local sdl = require 'ffi.req' 'sdl'
 local vec3ub = require 'vec-ffi.vec3ub'
 local ImGuiApp = require 'imguiapp'
-local class = require 'ext.class'
 local table = require 'ext.table'
 local vec2 = require 'vec.vec2'
 local Mouse = require 'glapp.mouse'
@@ -56,7 +55,7 @@ end
 
 local mouse = Mouse()
 
-local App = class(ImGuiApp)
+local App = ImGuiApp:subclass()
 
 local colors = {
 	vec3ub(0,0,0),
