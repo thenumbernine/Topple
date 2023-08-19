@@ -5,7 +5,6 @@ local ig = require 'imgui'
 local gl = require 'gl'
 local ImGuiApp = require 'imguiapp'	-- on windows, imguiapp needs to be before ig...
 local vec3ub = require 'vec-ffi.vec3ub'
-local class = require 'ext.class'
 local table = require 'ext.table'
 local vec2 = require 'vec.vec2'
 local GLProgram = require 'gl.program'
@@ -25,7 +24,7 @@ initValue = bit.lshift(1,tonumber(arg[1]) or 17)
 drawValue = 25
 local gridsize = assert(tonumber(arg[2] or 1024))
 
-local App = class(ImGuiApp)
+local App = ImGuiApp:subclass()
 local grad
 local pingpong
 local updateShader
