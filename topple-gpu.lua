@@ -17,9 +17,9 @@ local overflowCPU = ffi.new'char[1]'
 
 env:kernel{
 	argsOut = {buffer},
-	body = template([[ 
+	body = template([[
 	if (i.x == size.x / 2 && i.y == size.y / 2) {
-		buffer[index] = <?=initValue?>; 
+		buffer[index] = <?=initValue?>;
 	} else {
 		buffer[index] = 0;
 	}
@@ -79,8 +79,8 @@ local colors = {
 
 local bufferCPU = buffer:toCPU()
 require 'image'(
-	tonumber(env.base.size.x), 
-	tonumber(env.base.size.y), 
+	tonumber(env.base.size.x),
+	tonumber(env.base.size.y),
 	3,
 	'unsigned char',
 	function(x,y)
