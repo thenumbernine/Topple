@@ -2,6 +2,10 @@
 
 Seen on [numberphile](https://www.youtube.com/watch?v=1MtEUErz7Gg)
 
+[Launch](https://thenumbernine.github.io/glapp/index.html?dir=/topple&file=topple-glsl.lua) this repo's Lua version live, emulated WebGL demo.
+
+You can also see my [JavaScript version](https://github.com/thenumbernine/topple-js) which contains a native WebGL demo.
+
 ![](images/1048576.png)
 
 ![](images/3D.png)
