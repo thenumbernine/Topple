@@ -1,22 +1,21 @@
 #!/usr/bin/env luajit
 local ffi = require 'ffi'
-local sdl = require 'ffi.req' 'sdl'
 local ig = require 'imgui'
 local gl = require 'gl'
-local ImGuiApp = require 'imguiapp'	-- on windows, imguiapp needs to be before ig...
 local vec3ub = require 'vec-ffi.vec3ub'
+local vec2d = require 'vec-ffi.vec2d'
 local table = require 'ext.table'
 local vec2 = require 'vec.vec2'
-local GLProgram = require 'gl.program'
-local HSVTex = require 'gl.hsvtex'
-local PingPong = require 'gl.pingpong'
+local matrix_ffi = require 'matrix.ffi'
+local GLPingPong = require 'gl.pingpong'
+local GLGeometry = require 'gl.geometry'
+local GLSceneObject = require 'gl.sceneobject'
 local glreport = require 'gl.report'
 local GLTex2D = require 'gl.tex2d'
 local template = require 'template'
 local Image = require 'image'
 -- isle of misfits:
 local clnumber = require 'cl.obj.number'
-local Mouse = require 'glapp.mouse'
 
 local modulo = 4
 -- there's a bug with using more than 1<<16, so the 'b' and 'a' channels have something wrong in their math
@@ -24,13 +23,12 @@ initValue = bit.lshift(1,tonumber(arg[1]) or 17)
 drawValue = 25
 local gridsize = assert(tonumber(arg[2] or 1024))
 
-local App = ImGuiApp:subclass()
+local App = require 'imguiapp.withorbit'()
+App.viewUseBuiltinMatrixMath = true
+
 local grad
 local pingpong
-local updateShader
-local displayShader
-local mouse = Mouse()
-	
+
 local bufferCPU = ffi.new('int[?]', gridsize * gridsize)
 
 local colors = {
@@ -54,9 +52,15 @@ end
 function App:initGL()
 	App.super.initGL(self)
 
+	self.view.ortho = true
+	self.view.orthoSize = 1
+	self.view.pos:set(0, 0, 1)
+
+	self.pingPongProjMat = matrix_ffi({4,4}, 'float'):zeros():setOrtho(0, 1, 0, 1, -1, 1)
+
 	gl.glClearColor(.2, .2, .2, 0)
 
-	pingpong = PingPong{
+	pingpong = GLPingPong{
 		width = gridsize,
 		height = gridsize,
 		internalFormat = gl.GL_RGBA8,
@@ -89,19 +93,38 @@ function App:initGL()
 			colors[3].x, colors[3].y, colors[3].z,
 			colors[4].x, colors[4].y, colors[4].z,
 		}),
-	}
+	}:unbind()
 	grad:bind(1)
 
-	updateShader = GLProgram{
-		vertexCode = [[
-varying vec2 tc;
+	self.quadGeom = GLGeometry{
+		mode = gl.GL_TRIANGLE_STRIP,
+		vertexes = {
+			data = 	{
+				0, 0,
+				1, 0,
+				0, 1,
+				1, 1,
+			},
+			dim = 2,
+		},
+	}
+
+	self.updateSceneObj = GLSceneObject{
+		program = {
+			version = 'latest',
+			header = 'precision highp float;',
+			vertexCode = [[
+in vec2 vertex;
+out vec2 tc;
+uniform mat4 mvProjMat;
 void main() {
-	tc = gl_MultiTexCoord0.st;
-	gl_Position = ftransform();
+	tc = vertex;
+	gl_Position = mvProjMat * vec4(vertex, 0., 1.);
 }
 ]],
-		fragmentCode = template([[
-varying vec2 tc;
+			fragmentCode = template([[
+in vec2 tc;
+out vec4 fragColor;
 uniform sampler2D tex;
 
 const float du = <?=clnumber(du)?>;
@@ -117,84 +140,93 @@ vec4 fixedShift(vec4 v) {
 }
 
 void main() {
-	vec4 last = texture2D(tex, tc);
-	
+	vec4 last = texture(tex, tc);
+
 	//sum neighbors
-	vec4 next = fixedShift(texture2D(tex, tc + vec2(du, 0)))
-		+ fixedShift(texture2D(tex, tc + vec2(-du, 0)))
-		+ fixedShift(texture2D(tex, tc + vec2(0, du)))
-		+ fixedShift(texture2D(tex, tc + vec2(0, -du)));
+	vec4 next = fixedShift(texture(tex, tc + vec2(du, 0)))
+		+ fixedShift(texture(tex, tc + vec2(-du, 0)))
+		+ fixedShift(texture(tex, tc + vec2(0, du)))
+		+ fixedShift(texture(tex, tc + vec2(0, -du)));
 
 	//add last cell modulo
 	next.r += mod(last.r, modulo / 256.);
-	
+
 	//addition with overflow
 	next.g += floor(next.r) / 256.;
 	next.b += floor(next.g) / 256.;
 	next.a += floor(next.b) / 256.;
 	next = mod(next, 1.);
-	gl_FragColor = next;
+	fragColor = next;
 }
-]],			{
-				clnumber = clnumber,
-				du = 1 / gridsize,
-				modulo = modulo,
-			}
-		),
-		uniforms = {
-			tex = 0,
+]],				{
+					clnumber = clnumber,
+					du = 1 / gridsize,
+					modulo = modulo,
+				}
+			),
+			uniforms = {
+				tex = 0,
+			},
 		},
-	}:useNone()
+		geometry = self.quadGeom,
+	}
 
-	displayShader = GLProgram{
-		vertexCode = [[
-varying vec2 tc;
+	self.drawSceneObj = GLSceneObject{
+		program = {
+			version = 'latest',
+			header = 'precision highp float;',
+			vertexCode = [[
+in vec2 vertex;
+out vec2 tc;
+uniform mat4 mvProjMat;
 void main() {
-	gl_Position = ftransform();
-	tc = gl_MultiTexCoord0.st;
+	tc = vertex;
+	gl_Position = mvProjMat * vec4(vertex * 2. - 1., 0., 1.);
 }
 ]],
-		fragmentCode = template([[
-varying vec2 tc;
+			fragmentCode = template([[
+in vec2 tc;
+out vec4 fragColor;
 uniform sampler2D tex, grad;
 void main() {
-	vec3 toppleColor = texture2D(tex, tc).rgb;
+	vec3 toppleColor = texture(tex, tc).rgb;
 	float value = toppleColor.r * <?=clnumber(256 / modulo)?>;
-	gl_FragColor = texture2D(grad, vec2(value + <?=clnumber(.5 / modulo)?>, .5));
+	fragColor = texture(grad, vec2(value + <?=clnumber(.5 / modulo)?>, .5));
 }
-]],			{
-				clnumber = clnumber,
-				modulo = modulo,
-			}
-		),
-		uniforms = {
-			tex = 0,
-			grad = 1,
+]],				{
+					clnumber = clnumber,
+					modulo = modulo,
+				}
+			),
+			uniforms = {
+				tex = 0,
+				grad = 1,
+			},
 		},
-	}:useNone()
+		geometry = self.quadGeom,
+	}
 
 	glreport 'here'
 end
 
-local leftShiftDown
-local rightShiftDown 
-local zoomFactor = .9
-local zoom = 1
-local viewPos = vec2(0,0)
+-- hmm wish there was an easier way to do this
+local function vec3d_to_vec2d(v)
+	return vec2d(v.x, v.y)
+end
 
 local value = ffi.new('int[1]', 0)
 function App:update()
 	local ar = self.width / self.height
-	
+
 	local canHandleMouse = not ig.igGetIO()[0].WantCaptureMouse
-	if canHandleMouse then 
-		mouse:update()
-		if mouse.leftDown then
-			local pos = (vec2(mouse.pos:unpack()) - vec2(.5, .5)) * (2 / zoom)
-			pos[1] = pos[1] * ar
-			pos = ((pos + viewPos) * .5 + vec2(.5, .5)) * gridsize
-			local x = math.floor(pos[1] + .5)
-			local y = math.floor(pos[2] + .5)
+	if canHandleMouse then
+		self.mouse:update()
+		if self.mouse.rightDown then
+			local pos = (vec3d_to_vec2d(self.mouse.pos) - vec2d(.5, .5)) * (2 * self.view.orthoSize)
+			pos.x = pos.x * ar
+			pos = ((pos + vec3d_to_vec2d(self.view.pos)) * .5 + vec2d(.5, .5)) * gridsize
+			local x = math.floor(pos.x + .5)
+			local y = math.floor(pos.y + .5)
 			if x >= 0 and x < gridsize and y >= 0 and y < gridsize then
 				pingpong:draw{
 					callback = function()
@@ -202,92 +234,49 @@ function App:update()
 						value[0] = value[0] + drawValue
 					end,
 				}
-				pingpong:prev():bind(0)
-				gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, x, y, 1, 1, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, value)
-				pingpong:prev():unbind(0)
+				pingpong:prev()
+					:bind(0)
+					:subimage{xoffset=x, yoffset=y, width=1, height=1, data=value}
+					:unbind(0)
 				totalSand = totalSand + drawValue
-			end
-		end
-		if mouse.rightDragging then
-			if leftShiftDown or rightShiftDown then
-				zoom = zoom * math.exp(10 * mouse.deltaPos.y)
-			else
-				viewPos = viewPos - vec2(mouse.deltaPos.x * ar, mouse.deltaPos.y) * (2 / zoom)
 			end
 		end
 	end
 
 	-- update
+	gl.glViewport(0, 0, gridsize, gridsize)
 	pingpong:draw{
-		viewport = {0, 0, gridsize, gridsize},
-		resetProjection = true,
-		shader = updateShader,
-		texs = {pingpong:prev()},
+		--viewport = {0, 0, gridsize, gridsize},
 		callback = function()
-			gl.glBegin(gl.GL_TRIANGLE_STRIP)
-			for _,v in ipairs{{0,0},{1,0},{0,1},{1,1}} do
-				gl.glTexCoord2d(v[1], v[2])
-				gl.glVertex2d(v[1], v[2])
-			end
-			gl.glEnd()
+			gl.glClear(gl.GL_COLOR_BUFFER_BIT)
+			self.updateSceneObj.texs[1] = pingpong:prev()
+			self.updateSceneObj.uniforms.mvProjMat = self.pingPongProjMat.ptr
+			self.updateSceneObj:draw()
 		end,
 	}
+	gl.glViewport(0, 0, self.width, self.height)
 	pingpong:swap()
 
-	gl.glMatrixMode(gl.GL_PROJECTION)
-	gl.glLoadIdentity()
-	gl.glOrtho(-ar, ar, -1, 1, -1, 1)
+	gl.glClear(gl.GL_COLOR_BUFFER_BIT)
 
-	gl.glMatrixMode(gl.GL_MODELVIEW)
-	gl.glLoadIdentity()
-	gl.glScaled(zoom, zoom, 1)
-	gl.glTranslated(-viewPos[1], -viewPos[2], 0)
+	self.drawSceneObj.texs[1] = pingpong:cur()
+	self.drawSceneObj.uniforms.mvProjMat = self.view.mvProjMat.ptr
+	self.drawSceneObj:draw()
 
-	gl.glClear(bit.bor(gl.GL_COLOR_BUFFER_BIT, gl.GL_DEPTH_BUFFER_BIT))
-	displayShader:use()
-	pingpong:cur():bind(0)
-	gl.glBegin(gl.GL_TRIANGLE_STRIP)
-	for _,v in ipairs{{0,0},{1,0},{0,1},{1,1}} do
-		gl.glTexCoord2d(v[1], v[2])
-		gl.glVertex2d(v[1]*2-1, v[2]*2-1)
-	end
-	gl.glEnd()
-	pingpong:cur():unbind(0)
-	
-	GLProgram:useNone()
 	App.super.update(self)
-end
-
-function App:event(event, eventPtr)
-	App.super.event(self, event, eventPtr)
-	local canHandleMouse = not ig.igGetIO()[0].WantCaptureMouse
-	local canHandleKeyboard = not ig.igGetIO()[0].WantCaptureKeyboard
-
-	if event.type == sdl.SDL_MOUSEBUTTONDOWN then
-		if event.button.button == sdl.SDL_BUTTON_WHEELUP then
-			zoom = zoom * zoomFactor
-		elseif event.button.button == sdl.SDL_BUTTON_WHEELDOWN then
-			zoom = zoom / zoomFactor
-		end
-	elseif event.type == sdl.SDL_KEYDOWN or event.type == sdl.SDL_KEYUP then
-		if event.key.keysym.sym == sdl.SDLK_LSHIFT then
-			leftShiftDown = event.type == sdl.SDL_KEYDOWN
-		elseif event.key.keysym.sym == sdl.SDLK_RSHIFT then
-			rightShiftDown = event.type == sdl.SDL_KEYDOWN
-		end
-	end
 end
 
 function App:updateGUI()
 	ig.igText('total sand: '..totalSand)
-	
+
 	ig.luatableInputInt('initial value', _G, 'initValue')
 	ig.luatableInputInt('draw value', _G, 'drawValue')
-	
+
 	if ig.igButton'Save' then
-		pingpong:prev():bind(0)	-- prev? shouldn't this be cur?
-		gl.glGetTexImage(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, bufferCPU)
-		pingpong:prev():unbind(0)
+		pingpong:prev()
+			:bind()	-- prev? shouldn't this be cur?
+			:subimage{data=bufferCPU}
+			:unbind()
 		Image(gridsize, gridsize, 3, 'unsigned char', function(x,y)
 			local value = bufferCPU[x + gridsize * y]
 			value = value % modulo
@@ -325,7 +314,7 @@ function App:updateGUI()
 	end
 
 	ig.igSameLine()
-	
+
 	if ig.igButton'Reset' then
 		reset()
 	end
