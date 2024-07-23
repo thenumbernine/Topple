@@ -11,6 +11,7 @@ local clnumber = require 'cl.obj.number'
 local GLTex2D = require 'gl.tex2d'
 local GLTex3D = require 'gl.tex3d'
 local GLProgram = require 'gl.program'
+local GLSceneObject = require 'gl.sceneobject'
 local glreport = require 'gl.report'
 local template = require 'template'
 local Image = require 'image'
@@ -25,9 +26,9 @@ local gridsize = assert(tonumber(arg[2] or 256))
 local env, buffer, nextBuffer
 local iterKernel, doubleKernel, convertToTex
 
--- if GL sharing is enabled then this isn't needed ... 
+-- if GL sharing is enabled then this isn't needed ...
 -- except for drawing ... which could be done in GL as well ...
-local bufferCPU	
+local bufferCPU
 
 local totalSand = 0
 
@@ -53,6 +54,7 @@ local function iterate()
 end
 
 local App = require 'imguiapp.withorbit'()
+App.viewUseBuiltinMatrixMath = true
 
 local colors = {
 	vec3ub(0,0,0),
@@ -75,8 +77,15 @@ function App:initGL()
 	App.super.initGL(self)
 
 	-- init env after GL init to get GL sharing access
-	env = CLEnv{size = {gridsize, gridsize, gridsize}}
-	
+	env = CLEnv{
+		verbose = true,
+		useGLSharing = false,
+		getPlatform = CLEnv.getPlatformFromCmdLine(table.unpack(arg)),
+		getDevices = CLEnv.getDevicesFromCmdLine(table.unpack(arg)),
+		deviceType = CLEnv.getDeviceTypeFromCmdLine(table.unpack(arg)),
+		size = {gridsize, gridsize, gridsize},
+	}
+
 	buffer = env:buffer{name='buffer', type=toppleType}
 	nextBuffer = env:buffer{name='nextBuffer', type=toppleType}
 	bufferCPU = ffi.new(toppleType..'[?]', env.base.volume)
@@ -135,7 +144,7 @@ function App:initGL()
 			t = gl.GL_REPEAT,
 		},
 		data = graddata,
-	}
+	}:unbind()
 
 	tex = GLTex3D{
 		width = texsize,
@@ -149,10 +158,10 @@ function App:initGL()
 
 		internalFormat = gl.GL_RGBA,
 		type = gl.GL_UNSIGNED_BYTE,
-		
+
 		--internalFormat = gl.GL_RGBA32F,
 		--type = gl.GL_FLOAT,
-		
+
 		format = gl.GL_RGBA,
 		minFilter = gl.GL_NEAREST,
 		magFilter = gl.GL_NEAREST,
@@ -161,11 +170,10 @@ function App:initGL()
 			t = gl.GL_REPEAT,
 			r = gl.GL_REPEAT,
 		},
-	}
-	tex:unbind()
+	}:unbind()
 
 --[=[
-	if env.useGLSharing then 
+	if env.useGLSharing then
 		local CLImageGL = require 'cl.imagegl'
 		texCLMem = CLImageGL{context=env.ctx, tex=tex, write=true}
 
@@ -179,30 +187,35 @@ function App:initGL()
 		(float)buffer[index].s2 / 255.,
 		(float)buffer[index].s3 / 255.));
 ]]
-		}	
+		}
 		convertToTex:compile()
 		convertToTex.obj:setArgs(texCLMem, buffer)
 	end
 --]=]
 
 	shader = GLProgram{
+		version = 'latest',
+		header = 'precision highp float;',
 		vertexCode = [[
-varying vec3 tc;
+in vec3 vertex;
+out vec3 tcv;
+uniform mat4 mvProjMat;
 void main() {
-	gl_Position = ftransform();
-	tc = gl_MultiTexCoord0.xyz;
+	gl_Position = mvProjMat * vec4(vertex * 2. - 1., 1.);
+	tcv = vertex;
 }
 ]],
 		fragmentCode = template([[
-varying vec3 tc;
+in vec3 tcv;
+out vec4 fragColor;
 uniform sampler3D tex;
 uniform sampler2D grad;
 uniform float alpha;
 void main() {
-	vec3 toppleColor = texture3D(tex, tc).rgb;
+	vec3 toppleColor = texture(tex, tcv).rgb;
 	float value = toppleColor.r * <?=clnumber(256 / modulo)?>;
-	gl_FragColor = texture2D(grad, vec2(value + <?=clnumber(.5 / modulo)?>, .5));
-	gl_FragColor.a *= alpha;
+	fragColor = texture(grad, vec2(value + <?=clnumber(.5 / modulo)?>, .5));
+	fragColor.a *= alpha;
 }
 ]],			{
 				clnumber = clnumber,
@@ -214,39 +227,77 @@ void main() {
 			grad = 1,
 		},
 	}:useNone()
-	
+
+	local vertexesInQuad = {
+		{0,0},{1,0},{0,1},
+		{1,1},{0,1},{1,0},
+	}
+	self.drawSceneObjs = {}
+	for fwddir=1,3 do
+		self.drawSceneObjs[fwddir] = {}
+		for sign=-1,1,2 do
+			local numslices = gridsize
+			local n = numslices
+			local jmin, jmax, jdir
+			if sign < 0 then
+				jmin, jmax, jdir = 0, n, 1
+			else
+				jmin, jmax, jdir = n, 0, -1
+			end
+
+			local vertexes = table()
+			for j=jmin,jmax,jdir do
+				local f = (j+.5)/n
+				for _,vtx in ipairs(vertexesInQuad) do
+					if fwddir == 1 then
+						vertexes:append{f, vtx[1], vtx[2]}
+					elseif fwddir == 2 then
+						vertexes:append{vtx[1], f, vtx[2]}
+					elseif fwddir == 3 then
+						vertexes:append{vtx[1], vtx[2], f}
+					end
+				end
+			end
+			self.drawSceneObjs[fwddir][sign] = GLSceneObject{
+				program = shader,
+				vertexes = {
+					data = vertexes,
+					count = #vertexes / 3,
+					dim = 3,
+				},
+				geometry = {
+					mode = gl.GL_TRIANGLES,
+				},
+			}
+		end
+	end
+
 	glreport 'here'
 end
 
 alpha = .1
-local iteration = 1
-local leftShiftDown
-local rightShiftDown 
-local zoomFactor = .9
-local zoom = 1
-local viewPos = vec2d(0,0)
 function App:update()
 	local ar = self.width / self.height
 
 	--[[
 	local canHandleMouse = not ig.igGetIO()[0].WantCaptureMouse
-	if canHandleMouse then 
-		self.mouse:update()
-		if self.mouse.leftDown then
+	if canHandleMouse then
+		local zoom = (self.view.pos - self.view.orbit):length()
+		if self.mouse.rightDown then
 			buffer:toCPU(bufferCPU)
-			
+
 			local pos = (self.mouse.pos - vec2d(.5, .5)) * (2 / zoom)
 			pos.x = pos.x * ar
-			pos = ((pos + viewPos) * .5 + vec2d(.5, .5)) * gridsize
+			pos = ((pos + self.view.pos) * .5 + vec2d(.5, .5)) * gridsize
 			local curX = math.floor(pos.x + .5)
 			local curY = math.floor(pos.y + .5)
-			
+
 			local lastPos = (self.mouse.lastPos - vec2d(.5, .5)) * (2 / zoom)
 			lastPos.x = lastPos.x * ar
-			lastPos = ((lastPos + viewPos) * .5 + vec2d(.5, .5)) * gridsize
+			lastPos = ((lastPos + self.view.pos) * .5 + vec2d(.5, .5)) * gridsize
 			local lastX = math.floor(lastPos.x + .5)
 			local lastY = math.floor(lastPos.y + .5)
-		
+
 			local dx = curX - lastX
 			local dy = curY - lastY
 			local ds = math.ceil(math.max(math.abs(dx), math.abs(dy), 1))
@@ -254,10 +305,10 @@ function App:update()
 				local f = s/ds
 				local x = math.floor(lastX + dx * f + .5)
 				local y = math.floor(lastY + dy * f + .5)
-			
+
 				if x >= 0 and x < gridsize and y >= 0 and y < gridsize then
 					local ptr = bufferCPU + (x + gridsize * y)
-					if leftShiftDown or rightShiftDown then
+					if self.leftShiftDown or self.rightShiftDown then
 						local oldValue = ptr[0]
 						ptr[0] = math.max(0, ptr[0] - drawValue)
 						totalSand = totalSand + (ptr[0] - oldValue)
@@ -267,15 +318,8 @@ function App:update()
 					end
 				end
 			end
-					
+
 			buffer:fromCPU(bufferCPU)
-		end
-		if self.mouse.rightDragging then
-			if leftShiftDown or rightShiftDown then
-				zoom = zoom * math.exp(10 * self.mouse.deltaPos.y)
-			else
-				viewPos = viewPos - vec2d(self.mouse.deltaPos.x * ar, self.mouse.deltaPos.y) * (2 / zoom)
-			end
 		end
 	end
 	--]]
@@ -283,26 +327,23 @@ function App:update()
 	gl.glClear(bit.bor(gl.GL_COLOR_BUFFER_BIT, gl.GL_DEPTH_BUFFER_BIT))
 
 	self.view:setup(self.width/self.height)
-	
+
 	iterate()
-	
+
 	tex:bind(0)
 	--[[
-	if env.useGLSharing then 
+	if env.useGLSharing then
 		env.cmds:enqueueAcquireGLObjects{objs={texCLMem}}
 		convertToTex()
 		env.cmds:enqueueReleaseGLObjects{objs={texCLMem}}
 	else --]] do
 		buffer:toCPU(bufferCPU)
-		
+
 		for z=0,gridsize-1 do
 			gl.glTexSubImage3D(gl.GL_TEXTURE_3D, 0, 0, 0, z, gridsize, gridsize, 1, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, bufferCPU + gridsize * gridsize * z)
 		end
 	end
-	
-	shader:use()
-	gl.glUniform1f(shader.uniforms.alpha.loc, alpha)
-	grad:bind(1)
+	tex:unbind()
 
 	--gl.glEnable(gl.GL_DEPTH_TEST)
 	-- [[
@@ -310,7 +351,7 @@ function App:update()
 	gl.glEnable(gl.GL_BLEND)
 	gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
 	--]]
-	
+
 	--[[ draw points
 	gl.glPointSize(3)
 	gl.glBegin(gl.GL_POINTS)
@@ -344,58 +385,21 @@ function App:update()
 
 	local vertexesInQuad = {{0,0},{1,0},{1,1},{0,1}}
 
-	gl.glBegin(gl.GL_QUADS)
-	for j=jmin,jmax,jdir do
-		local f = (j+.5)/n
-		for _,vtx in ipairs(vertexesInQuad) do
-			if fwddir == 1 then
-				gl.glTexCoord3f(f, vtx[1], vtx[2])
-				gl.glVertex3f(2*f-1, 2*vtx[1]-1, 2*vtx[2]-1)
-			elseif fwddir == 2 then
-				gl.glTexCoord3f(vtx[1], f, vtx[2])
-				gl.glVertex3f(2*vtx[1]-1, 2*f-1, 2*vtx[2]-1)
-			elseif fwddir == 3 then
-				gl.glTexCoord3f(vtx[1], vtx[2], f)
-				gl.glVertex3f(2*vtx[1]-1, 2*vtx[2]-1, 2*f-1)
-			end
-		end
-	end
-	gl.glEnd()
+	local sceneobj = self.drawSceneObjs[fwddir][fwd.s[fwddir-1] < 0 and -1 or 1]
+	sceneobj.texs[1] = tex
+	sceneobj.texs[2] = grad
+	sceneobj.uniforms.alpha = alpha
+	sceneobj.uniforms.mvProjMat = self.view.mvProjMat.ptr
+	sceneobj:draw()
 	--]]
 	gl.glDisable(gl.GL_DEPTH_TEST)
-
-	grad:unbind(1)
-	tex:unbind(0)
-	shader:useNone()
 
 	App.super.update(self)
 end
 
---[[
-function App:event(event, eventPtr)
-	App.super.event(self, event, eventPtr)
-	local canHandleMouse = not ig.igGetIO()[0].WantCaptureMouse
-	local canHandleKeyboard = not ig.igGetIO()[0].WantCaptureKeyboard
-	
-	if event.type == sdl.SDL_MOUSEBUTTONDOWN then
-		if event.button.button == sdl.SDL_BUTTON_WHEELUP then
-			zoom = zoom * zoomFactor
-		elseif event.button.button == sdl.SDL_BUTTON_WHEELDOWN then
-			zoom = zoom / zoomFactor
-		end
-	elseif event.type == sdl.SDL_KEYDOWN or event.type == sdl.SDL_KEYUP then
-		if event.key.keysym.sym == sdl.SDLK_LSHIFT then
-			leftShiftDown = event.type == sdl.SDL_KEYDOWN
-		elseif event.key.keysym.sym == sdl.SDLK_RSHIFT then
-			rightShiftDown = event.type == sdl.SDL_KEYDOWN
-		end
-	end
-end
---]]
-
 function App:updateGUI()
 	ig.igText('total sand: '..totalSand)
-	
+
 	ig.luatableInputInt('initial value', _G, 'initValue')
 	ig.luatableInputInt('draw value', _G, 'drawValue')
 	ig.luatableInputFloat('alpha', _G, 'alpha')
@@ -452,4 +456,4 @@ function App:updateGUI()
 	end
 end
 
-App():run()
+return App():run()

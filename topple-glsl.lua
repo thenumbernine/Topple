@@ -318,4 +318,4 @@ function App:updateGUI()
 	end
 end
 
-App():run()
+return App():run()

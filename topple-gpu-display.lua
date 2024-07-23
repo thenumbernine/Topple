@@ -72,7 +72,7 @@ assert(texsize >= gridsize)
 
 function App:initGL()
 	App.super.initGL(self)
-	
+
 	self.view.ortho = true
 	self.view.orthoSize = 1
 	self.view.pos:set(0, 0, 1)
@@ -367,4 +367,4 @@ function App:updateGUI()
 	end
 end
 
-App():run()
+return App():run()
