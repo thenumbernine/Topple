@@ -12,7 +12,7 @@ local gridsize = assert(tonumber(arg[2] or 1001))
 local env = require 'cl.obj.env'{size = {gridsize, gridsize}}
 local buffer = env:buffer{name='buffer', type=toppleType}
 local nextBuffer = env:buffer{name='nextBuffer', type=toppleType}
-local overflow = env:buffer{size=1, name='overflow', type='char'}
+local overflow = env:buffer{count=1, name='overflow', type='char'}
 local overflowCPU = ffi.new'char[1]'
 
 env:kernel{
