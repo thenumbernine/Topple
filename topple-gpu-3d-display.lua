@@ -54,7 +54,6 @@ local function iterate()
 end
 
 local App = require 'imguiapp.withorbit'()
-App.viewUseBuiltinMatrixMath = true
 
 local colors = {
 	vec3ub(0,0,0),

@@ -22,7 +22,6 @@ drawValue = 25
 local gridsize = assert(tonumber(arg[2] or 1024))
 
 local App = require 'imguiapp.withorbit'()
-App.viewUseBuiltinMatrixMath = true
 
 local grad
 local pingpong
