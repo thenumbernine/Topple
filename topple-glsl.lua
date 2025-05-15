@@ -21,7 +21,7 @@ initValue = bit.lshift(1,tonumber(arg[1]) or 17)
 drawValue = 25
 local gridsize = assert(tonumber(arg[2] or 1024))
 
-local App = require 'imguiapp.withorbit'()
+local App = require 'imgui.appwithorbit'()
 
 local grad
 local pingpong

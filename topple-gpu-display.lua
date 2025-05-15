@@ -2,7 +2,7 @@
 local ffi = require 'ffi'
 local gl = require 'gl'
 local ig = require 'imgui'
-local sdl = require 'ffi.req' 'sdl'
+local sdl = require 'sdl'
 local vec3ub = require 'vec-ffi.vec3ub'
 local vec3d = require 'vec-ffi.vec3d'
 local vec2d = require 'vec-ffi.vec2d'
@@ -53,7 +53,7 @@ local function iterate()
 	buffer, nextBuffer = nextBuffer, buffer
 end
 
-local App = require 'imguiapp.withorbit'()
+local App = require 'imgui.appwithorbit'()
 
 local colors = {
 	vec3ub(0,0,0),
