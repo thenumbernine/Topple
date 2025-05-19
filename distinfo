@@ -1,0 +1,21 @@
+name = "Topple"
+files = {
+	["plot.lua"] = "Topple/plot.lua",
+	["test.lua"] = "Topple/test.lua",
+	["topple-glsl.lua"] = "Topple/topple-glsl.lua",
+	["topple-gpu-3d-display.lua"] = "Topple/topple-gpu-3d-display.lua",
+	["topple-gpu-display.lua"] = "Topple/topple-gpu-display.lua",
+	["topple-gpu.lua"] = "Topple/topple-gpu.lua",
+}
+deps = {
+	"cl",
+	"ext",
+	"gl",
+	"gnuplot",
+	"image",
+	"imgui",
+	"matrix",
+	"sdl",
+	"template",
+	"vec-ffi",
+}
