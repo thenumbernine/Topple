@@ -9,7 +9,15 @@ local modulo = 4
 local initValue = arg[1] or '1<<10'
 local gridsize = assert(tonumber(arg[2] or 1001))
 
-local env = require 'cl.obj.env'{size = {gridsize, gridsize}}
+local CLEnv = require 'cl.obj.env'
+local env = CLEnv{
+	verbose = true,
+	useGLSharing = false,
+	getPlatform = CLEnv.getPlatformFromCmdLine(table.unpack(arg)),
+	getDevices = CLEnv.getDevicesFromCmdLine(table.unpack(arg)),
+	deviceType = CLEnv.getDeviceTypeFromCmdLine(table.unpack(arg)),
+	size = {gridsize, gridsize},
+}
 local buffer = env:buffer{name='buffer', type=toppleType}
 local nextBuffer = env:buffer{name='nextBuffer', type=toppleType}
 local overflow = env:buffer{count=1, name='overflow', type='char'}
