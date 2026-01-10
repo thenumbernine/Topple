@@ -1,22 +1,20 @@
 #!/usr/bin/env luajit
 local ffi = require 'ffi'
-local ig = require 'imgui'
-local gl = require 'gl'
+local template = require 'template'
 local vec3ub = require 'vec-ffi.vec3ub'
 local vec2d = require 'vec-ffi.vec2d'
 local matrix_ffi = require 'matrix.ffi'
+local Image = require 'image'
+local gl = require 'gl'
+local glnumber = require 'gl.number'
+local glreport = require 'gl.report'
 local GLPingPong = require 'gl.pingpong'
 local GLGeometry = require 'gl.geometry'
 local GLSceneObject = require 'gl.sceneobject'
-local glreport = require 'gl.report'
 local GLTex2D = require 'gl.tex2d'
-local template = require 'template'
-local Image = require 'image'
--- isle of misfits:
-local clnumber = require 'cl.obj.number'
+local ig = require 'imgui'
 
 local modulo = 4
--- there's a bug with using more than 1<<16, so the 'b' and 'a' channels have something wrong in their math
 initValue = bit.lshift(1,tonumber(arg[1]) or 17)
 drawValue = 25
 local gridsize = assert(tonumber(arg[2] or 1024))
@@ -26,7 +24,7 @@ local App = require 'imgui.appwithorbit'()
 local grad
 local pingpong
 
-local bufferCPU = ffi.new('int[?]', gridsize * gridsize)
+local bufferCPU = ffi.new('int32_t[?]', gridsize * gridsize)
 
 local colors = {
 	vec3ub(0,0,0),
@@ -40,9 +38,10 @@ local totalSand = 0
 local function reset()
 	ffi.fill(bufferCPU, ffi.sizeof'int' * gridsize * gridsize)
 	bufferCPU[bit.rshift(gridsize,1) + gridsize * bit.rshift(gridsize,1)] = initValue
-	pingpong:prev():bind(0)
-	gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, gridsize, gridsize, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, bufferCPU)
-	pingpong:prev():unbind(0)
+	local tex = pingpong:prev()
+	tex:bind(0)
+	gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, gridsize, gridsize, tex.format, tex.type, bufferCPU)
+	tex:unbind(0)
 	totalSand = initValue
 end
 
@@ -60,9 +59,7 @@ function App:initGL()
 	pingpong = GLPingPong{
 		width = gridsize,
 		height = gridsize,
-		internalFormat = gl.GL_RGBA8,
-		format = gl.GL_RGBA,
-		type = gl.GL_UNSIGNED_BYTE,
+		internalFormat = gl.GL_R32UI,
 		minFilter = gl.GL_NEAREST,
 		magFilter = gl.GL_NEAREST,
 		wrap = {
@@ -121,42 +118,31 @@ void main() {
 ]],
 			fragmentCode = template([[
 in vec2 tc;
-out vec4 fragColor;
-uniform sampler2D tex;
+out uint fragColor;
+uniform usampler2D tex;
 
-const float du = <?=clnumber(du)?>;
-const float modulo = <?=clnumber(modulo)?>;
-
-//divide by modulo
-vec4 fixedShift(vec4 v) {
-	vec4 r = mod(v, modulo / 256.);
-	v -= r;	//remove lower bits
-	v /= modulo;	//perform fixed division
-	v.rgb += r.gba * (256. / modulo);	//add the remainder lower bits
-	return v;
-}
+const float du = <?=glnumber(du)?>;
+const uint modulo = <?=modulo?>;
 
 void main() {
-	vec4 last = texture(tex, tc);
+	uint last = texture(tex, tc).r;
+
+	uint nbhdR = texture(tex, tc + vec2(du, 0)).r;
+	uint nbhdL = texture(tex, tc + vec2(-du, 0)).r;
+	uint nbhdU = texture(tex, tc + vec2(0, du)).r;
+	uint nbhdD = texture(tex, tc + vec2(0, -du)).r;
 
 	//sum neighbors
-	vec4 next = fixedShift(texture(tex, tc + vec2(du, 0)))
-		+ fixedShift(texture(tex, tc + vec2(-du, 0)))
-		+ fixedShift(texture(tex, tc + vec2(0, du)))
-		+ fixedShift(texture(tex, tc + vec2(0, -du)));
+	uint next = (last % modulo)
+		+ (nbhdR / modulo)
+		+ (nbhdL / modulo)
+		+ (nbhdU / modulo)
+		+ (nbhdD / modulo);
 
-	//add last cell modulo
-	next.r += mod(last.r, modulo / 256.);
-
-	//addition with overflow
-	next.g += floor(next.r) / 256.;
-	next.b += floor(next.g) / 256.;
-	next.a += floor(next.b) / 256.;
-	next = mod(next, 1.);
 	fragColor = next;
 }
 ]],				{
-					clnumber = clnumber,
+					glnumber = glnumber,
 					du = 1 / gridsize,
 					modulo = modulo,
 				}
@@ -184,14 +170,15 @@ void main() {
 			fragmentCode = template([[
 in vec2 tc;
 out vec4 fragColor;
-uniform sampler2D tex, grad;
+uniform usampler2D tex;
+uniform sampler2D grad;
 void main() {
-	vec3 toppleColor = texture(tex, tc).rgb;
-	float value = toppleColor.r * <?=clnumber(256 / modulo)?>;
-	fragColor = texture(grad, vec2(value + <?=clnumber(.5 / modulo)?>, .5));
+	uint toppleColor = texture(tex, tc).r;
+	float value = float(toppleColor) * <?=glnumber(1 / modulo)?>;
+	fragColor = texture(grad, vec2(value + <?=glnumber(.5 / modulo)?>, .5));
 }
 ]],				{
-					clnumber = clnumber,
+					glnumber = glnumber,
 					modulo = modulo,
 				}
 			),
@@ -211,9 +198,25 @@ local function vec3d_to_vec2d(v)
 	return vec2d(v.x, v.y)
 end
 
-local value = ffi.new('int[1]', 0)
+
+local value = ffi.new('uint32_t[1]', 0)
 function App:update()
 	local ar = self.width / self.height
+
+--[[
+do
+	local tex = pingpong:prev()
+	tex:bind()
+	tex:toCPU(bufferCPU)
+	tex:unbind()
+counter = (counter or 0) + 1
+print('counter', counter)
+	for i=0,gridsize*gridsize-1 do
+		print(i, bufferCPU[i])
+	end
+if counter == 2 then  os.exit() end
+end
+--]]
 
 	local canHandleMouse = not ig.igGetIO()[0].WantCaptureMouse
 	if canHandleMouse then
@@ -225,9 +228,10 @@ function App:update()
 			local x = math.floor(pos.x + .5)
 			local y = math.floor(pos.y + .5)
 			if x >= 0 and x < gridsize and y >= 0 and y < gridsize then
+				local tex = pingpong:cur()
 				pingpong:draw{
 					callback = function()
-						gl.glReadPixels(x, y, 1, 1, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, value)
+						gl.glReadPixels(x, y, 1, 1, tex.format, tex.type, value)
 						value[0] = value[0] + drawValue
 					end,
 				}
@@ -305,9 +309,10 @@ function App:updateGUI()
 				end
 			end
 		end
-		pingpong:prev():bind(0)
-		gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, gridsize, gridsize, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, bufferCPU)
-		pingpong:prev():unbind(0)
+		local tex = pingpong:prev()
+		tex:bind(0)
+		gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, gridsize, gridsize, tex.format, tex.type, bufferCPU)
+		tex:unbind(0)
 	end
 
 	ig.igSameLine()
