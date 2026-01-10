@@ -1,11 +1,12 @@
 #!/usr/bin/env luajit
 local ffi = require 'ffi'
+local cmdline = require 'ext.cmdline'(...)
 local template = require 'template'
 local vec3ub = require 'vec-ffi.vec3ub'
 local vec2d = require 'vec-ffi.vec2d'
 local matrix_ffi = require 'matrix.ffi'
 local Image = require 'image'
-local gl = require 'gl'
+local gl = require 'gl.setup'(cmdline.gl)
 local glnumber = require 'gl.number'
 local glreport = require 'gl.report'
 local GLPingPong = require 'gl.pingpong'
@@ -104,6 +105,7 @@ void main() {
 }
 ]],
 			fragmentCode = template([[
+precision highp usampler2D;
 out uint fragColor;
 uniform usampler2D tex;
 void main() {
@@ -141,13 +143,14 @@ void main() {
 }
 ]],
 			fragmentCode = template([[
+precision highp usampler2D;
 in vec2 tc;
 out vec4 fragColor;
 uniform usampler2D tex;
 uniform sampler2D grad;
 void main() {
-	uint value = texelFetch(tex, ivec2(tc * <?=gridsize?>), 0).r % <?=modulo?>;
-	fragColor = texelFetch(grad, ivec2(value, 0), 0);
+	uint value = texelFetch(tex, ivec2(tc * <?=glnumber(gridsize)?>), 0).r % <?=modulo?>u;
+	fragColor = texelFetch(grad, ivec2(int(value), 0), 0);
 }
 ]],				{
 					glnumber = glnumber,
