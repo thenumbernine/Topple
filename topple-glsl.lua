@@ -52,8 +52,6 @@ function App:initGL()
 	self.view.orthoSize = 1
 	self.view.pos:set(0, 0, 1)
 
-	self.pingPongProjMat = matrix_ffi({4,4}, 'float'):zeros():setOrtho(0, 1, 0, 1, -1, 1)
-
 	gl.glClearColor(.2, .2, .2, 0)
 
 	pingpong = GLPingPong{
@@ -62,10 +60,6 @@ function App:initGL()
 		internalFormat = gl.GL_R32UI,
 		minFilter = gl.GL_NEAREST,
 		magFilter = gl.GL_NEAREST,
-		wrap = {
-			s = gl.GL_REPEAT,
-			t = gl.GL_REPEAT,
-		}
 	}
 	reset()
 
@@ -77,10 +71,6 @@ function App:initGL()
 		type = gl.GL_UNSIGNED_BYTE,
 		minFilter = gl.GL_NEAREST,
 		magFilter = gl.GL_NEAREST,
-		wrap = {
-			s = gl.GL_REPEAT,
-			t = gl.GL_REPEAT,
-		},
 		data = ffi.new('unsigned char[12]', {
 			colors[1].x, colors[1].y, colors[1].z,
 			colors[2].x, colors[2].y, colors[2].z,
@@ -109,41 +99,24 @@ function App:initGL()
 			header = 'precision highp float;',
 			vertexCode = [[
 in vec2 vertex;
-out vec2 tc;
-uniform mat4 mvProjMat;
 void main() {
-	tc = vertex;
-	gl_Position = mvProjMat * vec4(vertex, 0., 1.);
+	gl_Position = vec4(vertex * 2. - 1., 0., 1.);
 }
 ]],
 			fragmentCode = template([[
-in vec2 tc;
 out uint fragColor;
 uniform usampler2D tex;
-
-const float du = <?=glnumber(du)?>;
-const uint modulo = <?=modulo?>;
-
 void main() {
-	uint last = texture(tex, tc).r;
-
-	uint nbhdR = texture(tex, tc + vec2(du, 0)).r;
-	uint nbhdL = texture(tex, tc + vec2(-du, 0)).r;
-	uint nbhdU = texture(tex, tc + vec2(0, du)).r;
-	uint nbhdD = texture(tex, tc + vec2(0, -du)).r;
-
-	//sum neighbors
-	uint next = (last % modulo)
-		+ (nbhdR / modulo)
-		+ (nbhdL / modulo)
-		+ (nbhdU / modulo)
-		+ (nbhdD / modulo);
-
-	fragColor = next;
+	ivec2 itc = ivec2(gl_FragCoord);
+	fragColor = (texelFetch(tex, itc, 0).r % <?=modulo?>u)
+		+ (texelFetch(tex, ivec2((itc.x + 1) % <?=gridsize?>, itc.y), 0).r / <?=modulo?>u)
+		+ (texelFetch(tex, ivec2((itc.x + <?=gridsize?> - 1) % <?=gridsize?>, itc.y), 0).r / <?=modulo?>u)
+		+ (texelFetch(tex, ivec2(itc.x, (itc.y + 1) % <?=gridsize?>), 0).r / <?=modulo?>u)
+		+ (texelFetch(tex, ivec2(itc.x, (itc.y + <?=gridsize?> - 1) % <?=gridsize?>), 0).r / <?=modulo?>u)
+	;
 }
 ]],				{
-					glnumber = glnumber,
-					du = 1 / gridsize,
+					gridsize = gridsize,
 					modulo = modulo,
 				}
 			),
@@ -173,13 +146,13 @@ out vec4 fragColor;
 uniform usampler2D tex;
 uniform sampler2D grad;
 void main() {
-	uint toppleColor = texture(tex, tc).r;
-	float value = float(toppleColor) * <?=glnumber(1 / modulo)?>;
-	fragColor = texture(grad, vec2(value + <?=glnumber(.5 / modulo)?>, .5));
+	uint value = texelFetch(tex, ivec2(tc * <?=gridsize?>), 0).r % <?=modulo?>;
+	fragColor = texelFetch(grad, ivec2(value, 0), 0);
 }
 ]],				{
 					glnumber = glnumber,
 					modulo = modulo,
+					gridsize = gridsize,
 				}
 			),
 			uniforms = {
@@ -251,7 +224,6 @@ end
 		callback = function()
 			gl.glClear(gl.GL_COLOR_BUFFER_BIT)
 			self.updateSceneObj.texs[1] = pingpong:prev()
-			self.updateSceneObj.uniforms.mvProjMat = self.pingPongProjMat.ptr
 			self.updateSceneObj:draw()
 		end,
 	}
