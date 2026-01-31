@@ -4,7 +4,6 @@ local cmdline = require 'ext.cmdline'(...)
 local template = require 'template'
 local vec3ub = require 'vec-ffi.vec3ub'
 local vec2d = require 'vec-ffi.vec2d'
-local matrix_ffi = require 'matrix.ffi'
 local Image = require 'image'
 local gl = require 'gl.setup'(cmdline.gl)
 local glnumber = require 'gl.number'
