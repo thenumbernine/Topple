@@ -11,7 +11,6 @@ local CLEnv = require 'cl.obj.env'
 local clnumber = require 'cl.obj.number'
 local GLTex2D = require 'gl.tex2d'
 local GLSceneObject = require 'gl.sceneobject'
-local glreport = require 'gl.report'
 local template = require 'template'
 local Image = require 'image'
 
@@ -233,8 +232,6 @@ void main() {
 			},
 		},
 	}
-
-	glreport 'here'
 end
 
 -- hmm wish there was an easier way to do this

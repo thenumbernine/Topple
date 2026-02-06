@@ -12,7 +12,6 @@ local GLTex2D = require 'gl.tex2d'
 local GLTex3D = require 'gl.tex3d'
 local GLProgram = require 'gl.program'
 local GLSceneObject = require 'gl.sceneobject'
-local glreport = require 'gl.report'
 local template = require 'template'
 local Image = require 'image'
 
@@ -270,8 +269,6 @@ void main() {
 			}
 		end
 	end
-
-	glreport 'here'
 end
 
 alpha = .1

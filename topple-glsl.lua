@@ -7,7 +7,6 @@ local vec2d = require 'vec-ffi.vec2d'
 local Image = require 'image'
 local gl = require 'gl.setup'(cmdline.gl)
 local glnumber = require 'gl.number'
-local glreport = require 'gl.report'
 local GLPingPong = require 'gl.pingpong'
 local GLGeometry = require 'gl.geometry'
 local GLSceneObject = require 'gl.sceneobject'
@@ -164,8 +163,6 @@ void main() {
 		},
 		geometry = self.quadGeom,
 	}
-
-	glreport 'here'
 end
 
 -- hmm wish there was an easier way to do this
