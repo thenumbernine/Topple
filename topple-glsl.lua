@@ -179,8 +179,8 @@ function App:update()
 do
 	local tex = pingpong:prev()
 	tex:bind()
-	tex:toCPU(bufferCPU)
-	tex:unbind()
+		:getImage(bufferCPU)
+		:unbind()
 counter = (counter or 0) + 1
 print('counter', counter)
 	for i=0,gridsize*gridsize-1 do

@@ -77,12 +77,13 @@ function App:initGL()
 	-- init env after GL init to get GL sharing access
 	env = CLEnv{
 		verbose = true,
-		useGLSharing = false,
+		--useGLSharing = false,
 		getPlatform = CLEnv.getPlatformFromCmdLine(table.unpack(arg)),
 		getDevices = CLEnv.getDevicesFromCmdLine(table.unpack(arg)),
 		deviceType = CLEnv.getDeviceTypeFromCmdLine(table.unpack(arg)),
 		size = {gridsize, gridsize},
 	}
+print('useGLSharing', env.useGLSharing)
 
 	buffer = env:buffer{name='buffer', type=toppleType}
 	nextBuffer = env:buffer{name='nextBuffer', type=toppleType}
@@ -290,9 +291,9 @@ function App:update()
 
 	tex:bind(0)
 	if env.useGLSharing then
-		env.cmds:enqueueAcquireGLObjects{objs={texCLMem}}
+		env.cmds[1]:enqueueAcquireGLObjects{objs={texCLMem}}
 		convertToTex()
-		env.cmds:enqueueReleaseGLObjects{objs={texCLMem}}
+		env.cmds[1]:enqueueReleaseGLObjects{objs={texCLMem}}
 	else
 		buffer:toCPU(bufferCPU)
 		gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, gridsize, gridsize, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, bufferCPU)
